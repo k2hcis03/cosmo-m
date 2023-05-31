@@ -32,7 +32,7 @@ class UnitBoardTempControl(threading.Thread):
     #         self.logging.warning('unit board is not response')
             
     def run(self):
-            self.logging.info('UnitBoard Temp Control Thread Run')
+            self.logging.info(f'id : {self.id + 1} UnitBoard Temp Control Thread Run')
             while True:
                 try:
                     self.event.wait()
@@ -71,10 +71,41 @@ class UnitBoard:
         self.lock = threading.Lock()
         self.queue = Queue(12)
         
+        # 온도조절 관련 쓰레드 생성 ##################################################
         temp_thread = UnitBoardTempControl(self.id, self.queue, self.lock, self.event, self.logging, self.can_fd_transmitte_queue, 
                                                            self.can_fd_receive_queue, self.command_queue)
         temp_thread.start()
-                        
+        
+        ###########################################################################
+        # 처음 부팅이 되면 환경 설정을 유닛보드로 전송 ################################
+        message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
+                                    data=[0xF2, 0x16, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
+        message.data[4] = self.config['MOTOR_ID'] 
+        temp = self.config['SLEEP_SPEED'] 
+        message.data[6] = temp & 0xff               #big endian
+        message.data[5] = (temp >> 8) & 0xff        #big endian
+        message.data[7] = self.config['EXT_TEMP1_ID'] 
+        message.data[8] = self.config['EXT_TEMP2_ID'] 
+        message.data[9] = 0xFF
+        message.data[10] = 0xFF
+
+        while not self.can_fd_receive_queue.empty():
+            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+        self.can_fd_transmitte_queue.put(message) 
+        time.sleep(0.10)
+        
+        if not self.can_fd_receive_queue.empty():
+            self.logging.info(f'id : {self.id + 1} unit board is initialized')    
+            message = self.can_fd_receive_queue.get()
+            self.logging.info(f'id : {self.id + 1} Received message: {message}')
+            # if self.socket[0]:
+            #     if message.data[4] == 1:
+            #         self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"init success!"}), 'UTF-8'))
+            #     else:
+            #         self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"init fail!"}), 'UTF-8'))
+        else:
+            self.logging.warning(f'id : {self.id + 1} unit board is not response')      
+        ############################################################################                
         while True:
             try: 
                 command = self.command_queue.get()
@@ -85,7 +116,7 @@ class UnitBoard:
                 else:
                     i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF & (~command['unit_id']))
                 if not command:
-                    self.logging.warning('Timeout waiting for command')
+                    self.logging.warning(f'id : {self.id + 1} Timeout waiting for command')
                 else: 
                     if command['cmd'] == 'SET_MOTOR':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
@@ -101,46 +132,54 @@ class UnitBoard:
                             message.data[7] = 1
                         else:
                             message.data[7] = 0
+                            
+                        while not self.can_fd_receive_queue.empty():
+                            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+                        
                         self.can_fd_transmitte_queue.put(message) 
-                        time.sleep(0.10)
+                        time.sleep(0.40)
                         
                         if not self.can_fd_receive_queue.empty():
                             message = self.can_fd_receive_queue.get()
-                            self.logging.info(f'Received message: {message}')
+                            self.logging.info(f'id : {self.id + 1} Received message: {message}')
                             if self.socket[0]:
                                 if message.data[4] == 1:
-                                    self.socket[0].sendall(bytes(json.dumps({"status":"success!"}), 'UTF-8'))
+                                    self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":f"success!"}), 'UTF-8'))
                                 else:
-                                    self.socket[0].sendall(bytes(json.dumps({"status":"fail!"}), 'UTF-8'))
+                                    self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"fail!"}), 'UTF-8'))
                         else:
-                            self.logging.warning('unit board is not response')               
+                            self.logging.warning(f'id : {self.id + 1} unit board is not response')               
                     elif command['cmd'] == 'GET_ADC':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x12, 0x05, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xF3])
+                        
+                        while not self.can_fd_receive_queue.empty():
+                            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+            
                         self.can_fd_transmitte_queue.put(message) 
                         time.sleep(0.05)
                         
                         if not self.can_fd_receive_queue.empty():
                             message = self.can_fd_receive_queue.get()
-                            self.logging.info(f'Received message: {message}')
+                            self.logging.info(f'id : {self.id + 1} Received message: {message}')
                             self.unit_semaphor.acquire()
-                            self.shared_memory[0] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
-                            self.shared_memory[1] = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
-                            self.shared_memory[2] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
-                            self.shared_memory[3] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
-                            self.shared_memory[4] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
-                            self.shared_memory[5] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
+                            self.shared_memory[0 + self.id*20] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
+                            self.shared_memory[1 + self.id*20]  = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
+                            self.shared_memory[2 + self.id*20] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
+                            self.shared_memory[3 + self.id*20] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
+                            self.shared_memory[4 + self.id*20] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
+                            self.shared_memory[5 + self.id*20] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
                             self.unit_semaphor.release()
                             if self.socket[0]:
-                                self.socket[0].sendall(bytes(json.dumps({"status":"success!", 
-                                                                    "ADC0": f'{self.shared_memory[0]}',
-                                                                    "ADC1": f'{self.shared_memory[1]}',
-                                                                    "ADC2": f'{self.shared_memory[2]}',
-                                                                    "ADC3": f'{self.shared_memory[3]}',
-                                                                    "ADC4": f'{self.shared_memory[4]}',
-                                                                    "ADC5": f'{self.shared_memory[5]}'}), 'UTF-8'))
+                                self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!", 
+                                                                    "ADC0": f'{self.shared_memory[0 + self.id*20]}',
+                                                                    "ADC1": f'{self.shared_memory[1 + self.id*20]}',
+                                                                    "ADC2": f'{self.shared_memory[2 + self.id*20]}',
+                                                                    "ADC3": f'{self.shared_memory[3 + self.id*20]}',
+                                                                    "ADC4": f'{self.shared_memory[4 + self.id*20]}',
+                                                                    "ADC5": f'{self.shared_memory[5 + self.id*20]}'}), 'UTF-8'))
                         else:
-                            self.logging.warning('unit board is not response')
+                            self.logging.warning(f'id : {self.id + 1} unit board is not response') 
                     elif command['cmd'] == 'SET_GPIO':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x13, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -148,54 +187,71 @@ class UnitBoard:
                         message.data[4] = len(command['num'])
                         for i in range(message.data[4]):
                             message.data[5 + i] = command['value'][i]
+                        
+                        while not self.can_fd_receive_queue.empty():
+                            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+            
                         self.can_fd_transmitte_queue.put(message) 
                         time.sleep(0.05)
                         
                         if not self.can_fd_receive_queue.empty():
                             message = self.can_fd_receive_queue.get()
-                            self.logging.info(f'Received message: {message}')
+                            self.logging.info(f'id : {self.id + 1} Received message: {message}')
                             if self.socket[0]:
-                                self.socket[0].sendall(bytes(json.dumps({"status":"success!"}), 'UTF-8'))
+                                self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!"}), 'UTF-8'))
                         else:
-                            self.logging.warning('unit board is not response')
+                            self.logging.warning(f'id : {self.id + 1} unit board is not response') 
                     elif command['cmd'] == 'GET_STATUS':
                         # 온도계산 전에 GET_ADC를 호출 함.
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x12, 0x05, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xF3])
+                        
+                        while not self.can_fd_receive_queue.empty():
+                            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+            
                         self.can_fd_transmitte_queue.put(message) 
                         time.sleep(0.05)
                         
                         if not self.can_fd_receive_queue.empty():
                             message = self.can_fd_receive_queue.get()
-                            self.logging.info(f'Received message: {message}')
+                            self.logging.info(f'id : {self.id + 1} Received message: {message}')
                             self.unit_semaphor.acquire()
-                            self.shared_memory[0] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
-                            self.shared_memory[1] = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
-                            self.shared_memory[2] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
-                            self.shared_memory[3] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
-                            self.shared_memory[4] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
-                            self.shared_memory[5] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
+                            self.shared_memory[0 + self.id*20] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
+                            self.shared_memory[1 + self.id*20] = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
+                            self.shared_memory[2 + self.id*20] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
+                            self.shared_memory[3 + self.id*20] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
+                            self.shared_memory[4 + self.id*20] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
+                            self.shared_memory[5 + self.id*20] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
                             self.unit_semaphor.release()
                         else:
-                            self.logging.warning('unit board is not response')
+                            self.logging.warning(f'id : {self.id + 1} unit board is not response') 
                         # GET_ADC후에 GET_STATUS 수행
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x14, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
+                        
+                        while not self.can_fd_receive_queue.empty():
+                            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+                        
                         self.can_fd_transmitte_queue.put(message) 
                         time.sleep(0.05)
                         
                         if not self.can_fd_receive_queue.empty():
                             message = self.can_fd_receive_queue.get()
-                            self.logging.info(f'Received message: {message}')
+                            self.logging.info(f'id : {self.id + 1} Received message: {message}')
                             self.unit_semaphor.acquire()
-                            self.shared_memory[6] = (np.int32)(message.data[7] << 24 | message.data[6] << 16 
+                            self.shared_memory[6 + self.id*20] = (np.int32)(message.data[7] << 24 | message.data[6] << 16 
                                                             | message.data[5] << 8 | message.data[4])
-                            self.shared_memory[7] = (np.int32)(message.data[9] << 8 | message.data[8])
-                            self.shared_memory[8] = (np.int32)(message.data[13] << 24 | message.data[12] << 16 
+                            self.shared_memory[7 + self.id*20] = (np.int32)(message.data[9] << 8 | message.data[8])
+                            self.shared_memory[8 + self.id*20] = (np.int32)(message.data[13] << 24 | message.data[12] << 16 
                                                             | message.data[11] << 8 | message.data[10])
-                            self.shared_memory[9] = (np.int32)(message.data[14])
-                            self.shared_memory[10] = (np.int32)(message.data[15] << 8 | message.data[16]) #RPM
-                            self.shared_memory[11] = (np.int32)(message.data[17] << 8 | message.data[18]) #load cell
+                            self.shared_memory[9 + self.id*20] = (np.int32)(message.data[14])
+                            self.shared_memory[10 + self.id*20] = (np.int32)(message.data[15] << 8 | message.data[16]) #RPM
+                            self.shared_memory[11 + self.id*20] = (np.int32)(message.data[17] << 8 | message.data[18]) #load cell
+                            
+                            self.shared_memory[12 + self.id*20] = (np.int32)(message.data[19] << 8 | message.data[20]) #Ext Temp1
+                            self.shared_memory[13 + self.id*20] = (np.int32)(message.data[21] << 8 | message.data[22]) #Ext Humi1
+                            self.shared_memory[14 + self.id*20] = (np.int32)(message.data[23] << 8 | message.data[24]) #Ext Temp2
+                            self.shared_memory[15 + self.id*20] = (np.int32)(message.data[25] << 8 | message.data[26]) #Ext Humi2
                             self.unit_semaphor.release()
                             if self.socket[0]:
                                 inclination1 = 77.5 / (float(self.config['TEMP1_77_5']) - float(self.config['TEMP1_0']))
@@ -203,18 +259,22 @@ class UnitBoard:
                                 
                                 inclination2 = 77.5 / (float(self.config['TEMP2_77_5']) - float(self.config['TEMP2_0']))
                                 y_offset2 = inclination2 * float(self.config['TEMP2_0'])
-                                self.socket[0].sendall(bytes(json.dumps({"status":"success!", 
-                                                                    "TEMP1" : f'{inclination1 * self.shared_memory[0] - y_offset1}',
-                                                                    "TEMP2" : f'{inclination2 * self.shared_memory[1] - y_offset2}',
-                                                                    "GPO4~GPO1": f'{self.shared_memory[6]}',
-                                                                    "GPO8~GPO5": f'{self.shared_memory[7]}',
-                                                                    "GPI4~GPI1": f'{self.shared_memory[8]}',
-                                                                    "GPI8~GPI5": f'{self.shared_memory[9]}',
-                                                                    "RPM": f'{self.shared_memory[10]}',
-                                                                    "LOAD CELL": f'{self.shared_memory[11] * 0.01 : 0.2F}kg',
+                                self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!", 
+                                                                    "TEMP1" : f'{inclination1 * self.shared_memory[0 + self.id*20] - y_offset1 : 0.2F}',
+                                                                    "TEMP2" : f'{inclination2 * self.shared_memory[1 + self.id*20] - y_offset2 : 0.2F}',
+                                                                    "GPO4~GPO1": f'{self.shared_memory[6 + self.id*20]}',
+                                                                    "GPO8~GPO5": f'{self.shared_memory[7 + self.id*20]}',
+                                                                    "GPI4~GPI1": f'{self.shared_memory[8 + self.id*20]}',
+                                                                    "GPI8~GPI5": f'{self.shared_memory[9 + self.id*20]}',
+                                                                    "RPM": f'{self.shared_memory[10 + self.id*20]}',
+                                                                    "LOAD CELL": f'{self.shared_memory[11 + self.id*20] * 0.01 : 0.2F}kg',
+                                                                    "EXTTEMP1": f'{self.shared_memory[12 + self.id*20] * 0.01 : 0.2F}C',
+                                                                    "EXTHUMI1": f'{self.shared_memory[13 + self.id*20] * 0.01 : 0.2F}%',
+                                                                    "EXTTEMP2": f'{self.shared_memory[14 + self.id*20] * 0.01 : 0.2F}C',
+                                                                    "EXTHUMI2": f'{self.shared_memory[15 + self.id*20] * 0.01 : 0.2F}%',
                                                                     }), 'UTF-8'))
                         else:
-                            self.logging.warning('unit board is not response')
+                            self.logging.warning(f'id : {self.id + 1} unit board is not response') 
                     elif command['cmd'] == 'SET_TEMP':
                         temp = int(command['temp'])
                         if command['mode'] == 'BOTH':
@@ -239,5 +299,5 @@ class UnitBoard:
                 self.i2c_semaphor.release()
             except Exception as e:
                 print(e)
-                self.logging.error(f'{e}')
+                self.logging.error(f'id : {self.id + 1} {e}')
            
