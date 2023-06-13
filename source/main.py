@@ -96,7 +96,12 @@ class CosmoMain(threading.Thread):
                     self.command_queue[message['unit_id'] - 1].put(message)
                 else:
                     logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            elif message['cmd'] == 'SET_TEMP':
+            elif message['cmd'] == 'START_TEMP':
+                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
+                    self.command_queue[message['unit_id'] - 1].put(message)
+                else:
+                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
+            elif message['cmd'] == 'STOP_TEMP':
                 if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
                     self.command_queue[message['unit_id'] - 1].put(message)
                 else:

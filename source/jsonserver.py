@@ -20,7 +20,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
         self.request.settimeout(5.0)
         while True:
             try:
-                num = int(input("\n명령어를 넣어 주세요 1=MOTOR, 2=SET GPIO, 3=GET_ADC, 4=GET_STATUS, 5 = SET_TEMP : "))
+                num = int(input("\n명령어를 넣어 주세요 1=MOTOR, 2=SET GPIO, 3=GET_ADC, 4=GET_STATUS, 5 = START_TEMP 6 = STOP_TEMP: "))
                 # print(num)
                 if num == 1:
                     self.request.send(bytes(json.dumps({"unit_id" : 1,
@@ -40,7 +40,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                     self.request.send(bytes(json.dumps({"unit_id" : 1,
                                                     "cmd":"SET_GPIO",
                                                     "num" : [0, 1, 2, 3], 
-                                                    "value" : [True, True, True, True]}), 'UTF-8'))
+                                                    "value" : [False, False, False, False]}), 'UTF-8'))
                     try:
                         data = self.request.recv(1024)  # clip input at 1Kb
                         text = data.decode('utf-8')
@@ -71,11 +71,22 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                         print("Time out")
                 elif num == 5:
                     self.request.send(bytes(json.dumps({"unit_id" : 1,
-                                                    "cmd":"SET_TEMP",  
-                                                    "temp" : 22, 
+                                                    "cmd":"START_TEMP",  
                                                     "mode" : 'BOTH',
                                                     "time_out" : 28800}), 'UTF-8'))   #BOTH --> value & motor, MOTOR --> motor, 
-                                                                                 #VALVE --> valve, time --> sec
+                                                                                    #VALVE --> valve, time --> sec
+                    try:
+                        data = self.request.recv(1024)  # clip input at 1Kb
+                        text = data.decode('utf-8')
+                        print('\n')
+                        pprint(json.loads(text))
+                    except socket.timeout:
+                        print("Time out")
+                elif num == 6:
+                    self.request.send(bytes(json.dumps({"unit_id" : 1,
+                                                    "cmd":"STOP_TEMP",  
+                                                    "time_out" : 28800}), 'UTF-8'))   #BOTH --> value & motor, MOTOR --> motor, 
+                                                                                    #VALVE --> valve, time --> sec
                     try:
                         data = self.request.recv(1024)  # clip input at 1Kb
                         text = data.decode('utf-8')

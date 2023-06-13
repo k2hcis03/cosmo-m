@@ -7,47 +7,182 @@ import time
 import numpy as np
 import json
 from multiprocessing import Process, Queue, Manager, shared_memory
-import smbus
+import smbus 
 import threading
 from multiprocessing import Queue
+from datetime import datetime
+from threading import Timer
+from pid_controller import PID_Control
+import csv
 
+# _txt = ('갱신시간(sec)', '최소', '최대', '목표치', '비례이득(kp):', '적분이득(ki):', '미분이득(kd):')
+# _dt, _min, _max, _sv, _kp, _ki, _kd = (5, 0., 5., 21., 0.1, 0.5, 0.01)
+_dt, _min, _max, _sv, _kp, _ki, _kd = (5, 0., 5., 21., 0.1, 0.01, 0.01)
+g_file_path = "./data/ref.json"
+g_temp_control_start = False
+                   
 class UnitBoardTempControl(threading.Thread):
-    def __init__(self, id, queue, lock, event, logging, can_fd_transmitte_queue, can_fd_receive_queue, command_queue):
+    def __init__(self, id, queue, lock, event, logging, can_fd_transmitte_queue, 
+                 can_fd_receive_queue, command_queue, shared_memory, unit_semaphor, config):
         threading.Thread.__init__(self)
         self.daemon = True
-        self.id = id + 1            # id는 0부터 시작하므로 1을 더해줌.
+        self.id = id                            # id는 0부터 시작
         self.logging = logging
         self.can_fd_transmitte_queue = can_fd_transmitte_queue
         self.can_fd_receive_queue = can_fd_receive_queue
         self.lock = lock
         self.event = event
+        self.pid_event = threading.Event()
         self.queue = queue
         self.command_queue = command_queue
+        self.pid = PID_Control(_dt, _min, _max, _kp, _ki, _kd)
+        self.pid.update(_dt, _min, _max, _kp, _ki, _kd)
+        self.shared_memory = shared_memory
+        self.time_to_on = 0
+        self.pid_call_time = 0
+        self.unit_semaphor = unit_semaphor
+        
+        self.current_temp1 = 0              # 상부
+        self.current_temp2 = 0              # 하부
+        self.config = config
+        # Setup and start the timer        
+        # self.timer.start()
+        
+        with open(g_file_path, 'r') as file:
+            self.ref_data = json.load(file)
+            self.ref_step = self.ref_data['step']
+            self.ref_total  = self.ref_data['total']
+            self.ref_temp = self.ref_data['ref_data']
+            self.logging.info(f'id : {self.id + 1} UnitBoard read reference temperature data')
     
-    # def can_fd_response(self):
-    #     if not self.can_fd_receive_queue.empty():
-    #         message = self.can_fd_receive_queue.get()
-    #         self.logging.info(message)
-    #     else:
-    #         self.logging.warning('unit board is not response')
+    def pid_task(self):    
+        print(f'self.id {self.id+1} pid_task{self.pid_call_time} and {self.time_to_on} \
+              CT {self.current_temp2:0.2F} and FT and {self.ref_temp[0]}')
+        
+        if self.pid_call_time:
+            if self.time_to_on:
+                self.time_to_on -= 1
+                message = {"unit_id" : self.id + 1,                  
+                            "cmd":"SET_GPIO",
+                            "num" : [0, 1, 2, 3], 
+                            "value" : [False, True, False, False]}      
+            else:
+                message = {"unit_id" : self.id + 1,
+                            "cmd":"SET_GPIO",
+                            "num" : [0, 1, 2, 3], 
+                            "value" : [False, False, False, False]}       
+            self.command_queue.put(message)
+            self.pid_call_time -= 1
+            Timer(1, self.pid_task).start()
+        else:
+            Timer(1, self.pid_task).cancel()
+            self.pid_event.set()
+        
+        
+    def get_status(self, send_host = False):       
+        # 온도계산 전에 GET_ADC를 호출 함.
+        message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
+                    data=[0xF2, 0x12, 0x05, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xF3])
+        
+        while not self.can_fd_receive_queue.empty():
+            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+
+        self.can_fd_transmitte_queue.put(message) 
+        time.sleep(0.05)
+        
+        if not self.can_fd_receive_queue.empty():
+            message = self.can_fd_receive_queue.get()
+            self.logging.info(f'id : {self.id + 1} Received message: {message}')
             
+            self.unit_semaphor.acquire()
+            inclination1 = 77.5 / (float(self.config['TEMP1_77_5']) - float(self.config['TEMP1_0']))
+            y_offset1 = inclination1 * float(self.config['TEMP1_0'])
+                                
+            inclination2 = 77.5 / (float(self.config['TEMP2_77_5']) - float(self.config['TEMP2_0']))
+            y_offset2 = inclination2 * float(self.config['TEMP2_0'])
+            
+            self.shared_memory[0 + self.id*20] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
+            self.shared_memory[1 + self.id*20] = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
+            
+            self.current_temp1 =  inclination1 * self.shared_memory[0 + self.id*20] - y_offset1
+            self.current_temp2 =  inclination2 * self.shared_memory[1 + self.id*20] - y_offset2
+            
+            self.unit_semaphor.release()
+        else:
+            self.logging.warning(f'id : {self.id + 1} unit board is not response') 
+        # GET_ADC후에 GET_STATUS 수행
+        message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
+                    data=[0xF2, 0x14, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
+        
+        while not self.can_fd_receive_queue.empty():
+            self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+        
+        self.can_fd_transmitte_queue.put(message) 
+        time.sleep(0.05)
+        
+        if not self.can_fd_receive_queue.empty():
+            message = self.can_fd_receive_queue.get()
+            self.logging.info(f'id : {self.id + 1} Received message: {message}')
+            self.unit_semaphor.acquire()
+            self.shared_memory[6 + self.id*20] = (np.int32)(message.data[7] << 24 | message.data[6] << 16 
+                                            | message.data[5] << 8 | message.data[4])
+            self.shared_memory[7 + self.id*20] = (np.int32)(message.data[9] << 8 | message.data[8])
+            self.shared_memory[8 + self.id*20] = (np.int32)(message.data[13] << 24 | message.data[12] << 16 
+                                            | message.data[11] << 8 | message.data[10])
+            self.shared_memory[9 + self.id*20] = (np.int32)(message.data[14])
+            self.shared_memory[10 + self.id*20] = (np.int32)(message.data[15] << 8 | message.data[16]) #RPM
+            self.shared_memory[11 + self.id*20] = (np.int32)(message.data[17] << 8 | message.data[18]) #load cell
+            
+            self.shared_memory[12 + self.id*20] = (np.int32)(message.data[19] << 8 | message.data[20]) #Ext Temp1
+            self.shared_memory[13 + self.id*20] = (np.int32)(message.data[21] << 8 | message.data[22]) #Ext Humi1
+            self.shared_memory[14 + self.id*20] = (np.int32)(message.data[23] << 8 | message.data[24]) #Ext Temp2
+            self.shared_memory[15 + self.id*20] = (np.int32)(message.data[25] << 8 | message.data[26]) #Ext Humi2
+            self.unit_semaphor.release()
+        else:
+            self.logging.warning(f'id : {self.id + 1} unit board is not response')        
     def run(self):
             self.logging.info(f'id : {self.id + 1} UnitBoard Temp Control Thread Run')
             while True:
                 try:
                     self.event.wait()
-                    data = self.queue.get()
-                    mode = data['mode']
-                    temp = data['temp']
-                    time_out = data['time_out']
+                    self.event.clear()
+                    self.pid.update(_dt, _min, _max, _kp, _ki, _kd)
+                    ##############################################################################################################
+                    ## 온도 관련 동작
+                    ## 20230609
+                    ## @K2H
+                    ## 온도 테스트를 위한 데이저 저장. 
+                    self.writer_csv = open(f"test{self.id+1}.csv", 'w', encoding='utf-8', newline='')
+                    self.writer = csv.writer(self.writer_csv, delimiter=',')
+                    self.writer.writerow(['time'] + ['ref.temp'] + ['real temp'] + ['valve on time'])   
+                    ##############################################################################################################
+        
+                    for x in range(self.ref_total):
+                        if g_temp_control_start:
+                            time_start = time.time()
+                            ref_temp = self.ref_temp[x]
+                            
+                            while (time_start + self.ref_step) > time.time():
+                                if g_temp_control_start:
+                                    self.get_status()                               #현재 온도데이터 읽음.
+                                    # inc, desc = self.pid.calc(ref_temp, self.current_temp1)
+                                    inc, desc = self.pid.calc(self.current_temp2, ref_temp)
+                                    self.time_to_on = round(inc)                         #소수점 첫번째에서 반올림
+                                    self.pid_call_time = 4                               #타이머 호출 회수 -1
+                                    self.writer.writerow([time.time(), ref_temp, self.current_temp2, self.time_to_on])  
+                                    self.timer = Timer(1, self.pid_task).start()
+                                    self.pid_event.wait()                              #1초 타이머가 5번 호출되는것을 기다림
+                                    self.pid_event.clear()
+                                else:
+                                    self.writer_csv.close() 
+                                    break
+                        else:
+                            self.pid.update(_dt, _min, _max, _kp, _ki, _kd)
+                            break
+                    ##############################################################################################################
                     
-                    message = {"unit_id" : self.id,
-                        "cmd":"SET_GPIO",
-                        "num" : [0, 1, 2, 3], 
-                        "value" : [False, False, False, False]}
-                    
-                    self.command_queue.put(message)
                 except Exception as e:
+                    self.writer_csv.close()
                     print(e)
 
 class UnitBoard:
@@ -57,6 +192,7 @@ class UnitBoard:
         self.socket = shared_object
         self.GPIOADDR = GPIOADDR
         self.i2c_semaphor = i2c_semaphor
+        # self.pid_update()
         
     def unit_process(self, n, shm, arr, semaphor, receive_queue, command_queue, config):
         new_shm = shared_memory.SharedMemory(name=shm)
@@ -73,7 +209,8 @@ class UnitBoard:
         
         # 온도조절 관련 쓰레드 생성 ##################################################
         temp_thread = UnitBoardTempControl(self.id, self.queue, self.lock, self.event, self.logging, self.can_fd_transmitte_queue, 
-                                                           self.can_fd_receive_queue, self.command_queue)
+                                                           self.can_fd_receive_queue, self.command_queue, 
+                                                           self.shared_memory, self.unit_semaphor, self.config)
         temp_thread.start()
         
         ###########################################################################
@@ -105,7 +242,9 @@ class UnitBoard:
             #         self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"init fail!"}), 'UTF-8'))
         else:
             self.logging.warning(f'id : {self.id + 1} unit board is not response')      
-        ############################################################################                
+        ############################################################################    
+        global g_temp_control_start
+                    
         while True:
             try: 
                 command = self.command_queue.get()
@@ -275,24 +414,18 @@ class UnitBoard:
                                                                     }), 'UTF-8'))
                         else:
                             self.logging.warning(f'id : {self.id + 1} unit board is not response') 
-                    elif command['cmd'] == 'SET_TEMP':
-                        temp = int(command['temp'])
-                        if command['mode'] == 'BOTH':
-                            mode = 0
-                        elif command['mode'] == 'MOTOR':
-                            mode = 1
-                        else:
-                            mode = 2
-                        time_out = int(command['time_out'])
-                        
-                        self.queue.put({
-                            'temp' : temp,
-                            'mode' : mode,
-                            'time_out' : time_out
-                        })
+                    elif command['cmd'] == 'START_TEMP':
                         self.event.set()
-                        # 여기서는 따로 응답하지 않고 위에서 정의 된 명령어에서 응답함.
-                            
+                        g_temp_control_start = True
+                        
+                        if self.socket[0]:
+                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!"}), 'UTF-8'))
+                    elif command['cmd'] == 'STOP_TEMP':
+                        g_temp_control_start = False
+                        
+                        if self.socket[0]:
+                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!"}), 'UTF-8'))
+                                 
                 i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0xFF)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF)
                 i2cbus.close()
@@ -300,4 +433,6 @@ class UnitBoard:
             except Exception as e:
                 print(e)
                 self.logging.error(f'id : {self.id + 1} {e}')
-           
+    # def pid_update(self):
+    #     global _dt, _min, _max, _sv, _kp, _ki, _kd
+    #     _dt, _min, _max, _sv, _kp, _ki, _kd = (5, 0., 5., 21., 0.1, 0.5, 0.01)
