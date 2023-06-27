@@ -5,6 +5,7 @@ import sys
 import os
 import can
 import time
+import signal
 
 from logger import logger as logging
 from concurrent.futures import ThreadPoolExecutor
@@ -16,8 +17,9 @@ import canfd
 import queue
 from concurrent.futures import wait
 import numpy as np
-from konfig import Config
-
+# from konfig import Config
+import configparser
+import unitboard
 from unitboard import UnitBoard as unit_board
 from client import TcpClientThread as tcp_client
 
@@ -26,7 +28,7 @@ shared_object.insert(0, None)
 
 GPIOADDR = 0x20
 MAXUNITBOARD = 1
-         
+   
 class CosmoMain(threading.Thread):
     def __init__(self, tcp_queue) -> None:
         threading.Thread.__init__(self) 
@@ -73,8 +75,9 @@ class CosmoMain(threading.Thread):
         
     def run(self):
         while True:   
-            message = self.tcp_queue.get()   
-            logging.info(f"{message['cmd']} command is inserted to {message['unit_id']} Unit Board")
+            message = self.tcp_queue.get()  
+            if  message['cmd'] != 'GET_STATUS': 
+                logging.info(f"{message['cmd']} command is inserted to {message['unit_id']} Unit Board")
             
             if message['cmd'] == 'SET_MOTOR':
                 if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
@@ -106,6 +109,11 @@ class CosmoMain(threading.Thread):
                     self.command_queue[message['unit_id'] - 1].put(message)
                 else:
                     logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
+            elif message['cmd'] == 'TEMP_RPM':
+                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
+                    self.command_queue[message['unit_id'] - 1].put(message)
+                else:
+                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
             # self.unit_semaphor.acquire()
             # self.unit_np_shm[0] = self.unit_np_shm[0] + 1
             # self.unit_semaphor.release()
@@ -113,23 +121,24 @@ class CosmoMain(threading.Thread):
 def main():
     tcp_queue = queue.Queue(maxsize=128)
     main_func = CosmoMain(tcp_queue)
-    main_func.config_file = Config("/home/pi/Projects/cosmo-m/config/config.ini")      # For VSC
-    common = main_func.config_file.get_map('common')
+    
+    config_file = configparser.ConfigParser()  ## 클래스 객체 생성
+    config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')  ## 파일 읽기
+
+    # main_func.config_file = Config("/home/pi/Projects/cosmo-m/config/config.ini")      # For VSC
+    common_config = config_file['common']
     
     global MAXUNITBOARD, ADDRESS
-    MAXUNITBOARD = common['MAXUNITBOARD']
-    GPIOADDR = int(common['GPIOADDR'], 16)
+    MAXUNITBOARD = int(common_config['MAXUNITBOARD'])
+    GPIOADDR = int(common_config['GPIOADDR'], 16)
     
-    ip = common['HOST']
-    port = common['PORT']    
+    ip = common_config['HOST']
+    port = int(common_config['PORT'])   
     manager = Manager()
     
     can_fd_receive = canfd.CanFDReceive(logging, main_func)
     can_fd_receive.start()
     i2c_semaphor = manager.Semaphore(1) 
-    
-    main_func.client = tcp_client(ip, port, tcp_queue, logging, GPIOADDR, shared_object, i2c_semaphor)
-    main_func.client.start()                           #tcp client 시작
     
     can_fd_transmitte = canfd.CanFDTransmitte(logging, main_func)
     can_fd_transmitte.queue = manager.Queue(128)
@@ -140,7 +149,8 @@ def main():
         main_func.command_queue.append(manager.Queue(128))
     
     # 숫자를 저장할 numpy 배열(1차원) 생성
-    arr = np.array([i for i in range(MAXUNITBOARD*20)], dtype=np.int32) 
+    shared_mem_size = int(common_config['SHARED_MEMORY_SIZE'])
+    arr = np.array([i for i in range(MAXUNITBOARD * shared_mem_size)], dtype=np.int32) 
     # 공유 메모리 생성
     shm = shared_memory.SharedMemory(create=True, size=arr.nbytes)
     # 공유 메모리의 버퍼를 numpy 배열로 변환
@@ -148,23 +158,31 @@ def main():
     main_func.unit_semaphor = manager.Semaphore(1) 
     main_func.start()
     
+    main_func.client = tcp_client(ip, port, tcp_queue, logging, GPIOADDR, shared_object, i2c_semaphor, MAXUNITBOARD, 
+                                  shm.name, main_func.unit_np_shm)
+    main_func.client.start()                            #tcp client 시작
+    unitboard.g_file_path = common_config['JSON_FILE']
     try:
         while True:
             if shared_object[0] and not shared_object[0]._closed:           #처음 서버에 연결 될 때까지 무한루프 실행
                 with ProcessPoolExecutor(max_workers=20) as executor:
                     unit_func = unit_board(logging, can_fd_transmitte.queue, shared_object, GPIOADDR, i2c_semaphor)
+                    
                     furtures = {executor.submit(unit_func.unit_process, i, shm.name, main_func.unit_np_shm, 
                                                 main_func.unit_semaphor, can_fd_receive.receive_queue[i],
-                                                main_func.command_queue[i], main_func.config_file.get_map(f'unit_board{i+1}')) : i for i in range(MAXUNITBOARD)}
-
-                    for furture in as_completed(furtures):    
+                                                main_func.command_queue[i]) : i for i in range(MAXUNITBOARD)}
+                    for furture in as_completed(furtures):  
                         print("All Process is done")
                     sys.exit(1)
             else:
                 time.sleep(1)
                 print("Server is not Connected")
-    except KeyboardInterrupt as e:
+    except Exception as e:
         main_func.can0.shutdown()
+        shm.close()
+        shm.unlink()
+        for i in range(MAXUNITBOARD):
+            os.kill(main_func.unit_np_shm[i*shared_mem_size + 29], signal.SIGKILL)
         print(e)
         
 if __name__ == "__main__":
