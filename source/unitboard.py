@@ -12,7 +12,6 @@ import threading
 from multiprocessing import Queue
 from datetime import datetime
 from threading import Timer
-# from pid_controller import PID_Control
 from pid_controller import PID_COSMO_M
 import csv
 from konfig import Config
@@ -79,18 +78,18 @@ class UnitBoardTempControl(threading.Thread):
             if self.time_to_on:
                 self.time_to_on -= 1
                 if self.cold_valve_status == 0:
-                    message = {"unit_id" : self.id + 1,                  
-                                "cmd":"TEMP_VALVE",
-                                "channel": x,
-                                "value" : True}
+                    message = {"UNIT_ID" : self.id + 1,                  
+                                "CMD":"TEMP_VALVE",
+                                "CHANNEL": x,
+                                "VALUE" : True}
                     self.set_cold_valve(1)
                     self.command_queue.put(message) 
             else:
                 if self.cold_valve_status == 1:
-                    message = {"unit_id" : self.id + 1,
-                                "cmd":"TEMP_VALVE",
-                                "channel": x,
-                                "value" : False} 
+                    message = {"UNIT_ID" : self.id + 1,
+                                "CMD":"TEMP_VALVE",
+                                "CHANNEL": x,
+                                "VALUE" : False} 
                     self.set_cold_valve(0) 
                     self.command_queue.put(message)
             self.pid_call_time -= 1
@@ -129,12 +128,12 @@ class UnitBoardTempControl(threading.Thread):
                             self.ref_motor_time = self.ref_data[x]["M_TIME"]
                             self.pid.modify_setpoint(self.ref_temp)
                             
-                            message = {"unit_id" : self.id + 1,                  
-                                        "cmd":"TEMP_RPM",
-                                        "speed" : self.ref_rpm, 
-                                        "dir"   : 'FW',            #FW = forward, RV = reverse
-                                        "onoff" : 'ON', 
-                                        "time" : self.ref_motor_time}    
+                            message = {"UNIT_ID" : self.id + 1,                  
+                                        "CMD":"TEMP_RPM",
+                                        "SPEED" : self.ref_rpm, 
+                                        "DIR"   : 'FW',            #FW = forward, RV = reverse
+                                        "ONOFF" : 'ON', 
+                                        "TIME" : self.ref_motor_time}    
                             self.command_queue.put(message) 
                             self.logging.info(f'id : {self.id + 1} UnitBoard Temp Control Thread {x} Step Start at {time_start} Time')
                             
@@ -142,7 +141,7 @@ class UnitBoardTempControl(threading.Thread):
                                 if g_temp_control_start:
                                     # client.py에서 data = {"unit_id" : x + 1, "cmd":"GET_STATUS", "send" : False, "raw" : False}
                                     # 로 데이터를 보내므로 온도 값이 계산되어 저장됨 따라서 *0.01을 하면 온도 값으로 사용
-                                    self.current_temp2 = self.shared_memory[17 + self.id*self.shared_memory_size] * 0.01 #온도 센서 2
+                                    self.current_temp2 = self.shared_memory[0x11 + self.id*self.shared_memory_size] * 0.01 #온도 센서 2
                                     
                                     inc = self.pid(self.current_temp2)
                                     self.time_to_on = round(inc)                            #소수점 첫번째에서 반올림
@@ -195,7 +194,7 @@ class UnitBoard:
             self.config = self.config_file[f'unit_board{self.id+1}']
         except Exception as e:
             print(e)
-        self.shared_memory[29 + self.id * self.shared_memory_size] = os.getpid()       
+        self.shared_memory[0x1D + self.id * self.shared_memory_size] = os.getpid()       
         # 온도조절 관련 쓰레드 생성 ##################################################
         temp_thread = UnitBoardTempControl(self.id, self.queue, self.lock, self.event, self.logging, self.can_fd_transmitte_queue, 
                                                            self.can_fd_receive_queue, self.command_queue, 
@@ -233,24 +232,42 @@ class UnitBoard:
                 command = self.command_queue.get()
                 self.i2c_semaphor.acquire()
                 i2cbus = smbus.SMBus(1)
-                if command['unit_id'] < 8:
-                    i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0xFF & (~command['unit_id']))
+                if command['UNIT_ID'] < 8:
+                    i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0xFF & (~command['UNIT_ID']))
                 else:
-                    i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF & (~command['unit_id']))
+                    i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF & (~command['UNIT_ID']))
                 if not command:
                     self.logging.warning(f'id : {self.id + 1} Timeout waiting for command')
                 else: 
-                    if command['cmd'] == 'SET_MOTOR':
+                    if command['CMD'] == 'REF':
+                        pass
+                    elif command['CMD'] == 'STATE':
+                        if int(self.config_file['TANK_ID']) == command['DATA'][self.id]['TANK_ID']:
+                            if command['DATA'][self.id]['STATUS'] == 'None':
+                                status = 0
+                            elif command['DATA'][self.id]['STATUS'] == 'Stop':
+                                status = 1
+                            elif command['DATA'][self.id]['STATUS'] == 'Run':
+                                status = 2
+                            elif command['DATA'][self.id]['STATUS'] == 'Puase':
+                                status = 3
+                            elif command['DATA'][self.id]['STATUS'] == 'Initial':
+                                status = 4
+                            elif command['DATA'][self.id]['STATUS'] == 'Error':
+                                status = 5
+                            self.shared_memory[0x18 + self.id*self.shared_memory_size] = command['DATA'][self.id]['STAGE'] << 16 | status
+                            
+                    elif command['CMD'] == 'SET_MOTOR':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x11, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
-                        temp = int(command['speed'])
+                        temp = int(command['SPEED'])
                         message.data[5] = temp & 0xff               # big endian
                         message.data[4] = (temp >> 8) & 0xff        # big endian
-                        if command['dir'] == 'FW':
+                        if command['DIR'] == 'FW':
                             message.data[6] = 1
                         else:
                             message.data[6] = 0
-                        if command['onoff'] == 'ON':
+                        if command['ONOFF'] == 'ON':
                             message.data[7] = 1
                         else:
                             message.data[7] = 0
@@ -274,7 +291,7 @@ class UnitBoard:
                                 self.logging.warning(f'id : {self.id + 1} unit board is wrong response')  
                         else:
                             self.logging.warning(f'id : {self.id + 1} unit board is not response')               
-                    elif command['cmd'] == 'GET_ADC':
+                    elif command['CMD'] == 'GET_ADC':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x12, 0x05, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xF3])
                         
@@ -289,32 +306,32 @@ class UnitBoard:
                             if message.data[1] == 0x12:
                                 self.logging.info(f'id : {self.id + 1} Received message: {message}')
                                 self.unit_semaphor.acquire()
-                                self.shared_memory[0 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
-                                self.shared_memory[1 + self.id*self.shared_memory_size]  = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
-                                self.shared_memory[2 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
-                                self.shared_memory[3 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
-                                self.shared_memory[4 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
-                                self.shared_memory[5 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
+                                self.shared_memory[0x00 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
+                                self.shared_memory[0x01 + self.id*self.shared_memory_size]  = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
+                                self.shared_memory[0x02 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
+                                self.shared_memory[0x03 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
+                                self.shared_memory[0x04 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
+                                self.shared_memory[0x05 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
                                 self.unit_semaphor.release()
                                 if self.socket[0]:
                                     self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!", 
-                                                "ADC0": f'{self.shared_memory[0 + self.id*self.shared_memory_size]}',
-                                                "ADC1": f'{self.shared_memory[1 + self.id*self.shared_memory_size]}',
-                                                "ADC2": f'{self.shared_memory[2 + self.id*self.shared_memory_size]}',
-                                                "ADC3": f'{self.shared_memory[3 + self.id*self.shared_memory_size]}',
-                                                "ADC4": f'{self.shared_memory[4 + self.id*self.shared_memory_size]}',
-                                                "ADC5": f'{self.shared_memory[5 + self.id*self.shared_memory_size]}'}), 'UTF-8'))
+                                                "ADC0": f'{self.shared_memory[0x00 + self.id*self.shared_memory_size]}',
+                                                "ADC1": f'{self.shared_memory[0x01 + self.id*self.shared_memory_size]}',
+                                                "ADC2": f'{self.shared_memory[0x02 + self.id*self.shared_memory_size]}',
+                                                "ADC3": f'{self.shared_memory[0x03 + self.id*self.shared_memory_size]}',
+                                                "ADC4": f'{self.shared_memory[0x04 + self.id*self.shared_memory_size]}',
+                                                "ADC5": f'{self.shared_memory[0x05 + self.id*self.shared_memory_size]}'}), 'UTF-8'))
                             else:
                                 self.logging.warning(f'id : {self.id + 1} unit board is wrong response') 
                         else:
                             self.logging.warning(f'id : {self.id + 1} unit board is not response') 
-                    elif command['cmd'] == 'SET_GPIO':
+                    elif command['CMD'] == 'SET_GPIO':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x13, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
-                        message.data[4] = len(command['num'])
+                        message.data[4] = len(command['NUM'])
                         for i in range(message.data[4]):
-                            message.data[5 + i] = command['value'][i]
+                            message.data[5 + i] = command['VALUE'][i]
                         
                         while not self.can_fd_receive_queue.empty():
                             self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
@@ -332,7 +349,7 @@ class UnitBoard:
                                 self.logging.warning(f'id : {self.id + 1} unit board is wrong response') 
                         else:
                             self.logging.warning(f'id : {self.id + 1} unit board is not response') 
-                    elif command['cmd'] == 'GET_STATUS':
+                    elif command['CMD'] == 'GET_STATUS':
                         # 온도계산 전에 GET_ADC를 호출 함.
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x12, 0x05, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xF3])
@@ -346,15 +363,15 @@ class UnitBoard:
                         if not self.can_fd_receive_queue.empty():
                             message = self.can_fd_receive_queue.get()
                             if message.data[1] == 0x12:
-                                if command['send']:                 # 로고에 너무 많이 쌓이는 데이터 방지, 
+                                if command['SEND']:                 # 로고에 너무 많이 쌓이는 데이터 방지, 
                                     self.logging.info(f'id : {self.id + 1} Received message: {message}')
                                 self.unit_semaphor.acquire()
-                                self.shared_memory[0 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
-                                self.shared_memory[1 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
-                                self.shared_memory[2 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
-                                self.shared_memory[3 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
-                                self.shared_memory[4 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
-                                self.shared_memory[5 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
+                                self.shared_memory[0x00 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[5] << 8) | (np.int32)(message.data[4]))
+                                self.shared_memory[0x01 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[7] << 8) | (np.int32)(message.data[6]))
+                                self.shared_memory[0x02 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[9] << 8) | (np.int32)(message.data[8]))
+                                self.shared_memory[0x03 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[11] << 8) | (np.int32)(message.data[10]))
+                                self.shared_memory[0x04 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[13] << 8) | (np.int32)(message.data[12]))
+                                self.shared_memory[0x05 + self.id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[15] << 8) | (np.int32)(message.data[14]))
                                 self.unit_semaphor.release()
                             else:
                                 self.logging.warning(f'id : {self.id + 1} unit board is wrong response')
@@ -373,7 +390,7 @@ class UnitBoard:
                         if not self.can_fd_receive_queue.empty():
                             message = self.can_fd_receive_queue.get()
                             if message.data[1] == 0x14:
-                                if command['send']:                      # 로고에 너무 많이 쌓이는 데이터 방지, 
+                                if command['SEND']:                      # 로고에 너무 많이 쌓이는 데이터 방지, 
                                     self.logging.info(f'id : {self.id + 1} Received message: {message}')
                                 inclination1 = 77.5 / (float(self.config['TEMP1_77_5']) - float(self.config['TEMP1_0']))
                                 y_offset1 = inclination1 * float(self.config['TEMP1_0'])
@@ -388,73 +405,73 @@ class UnitBoard:
                                 # y_offset4 = inclination4 * float(self.config['TEMP4_0'])
                                     
                                 self.unit_semaphor.acquire()
-                                self.shared_memory[6 + self.id*self.shared_memory_size] = (np.int32)(message.data[7] << 24 | message.data[6] << 16 
+                                self.shared_memory[0x06 + self.id*self.shared_memory_size] = (np.int32)(message.data[7] << 24 | message.data[6] << 16 
                                                                 | message.data[5] << 8 | message.data[4])
-                                self.shared_memory[7 + self.id*self.shared_memory_size] = (np.int32)(message.data[9] << 8 | message.data[8])
-                                self.shared_memory[8 + self.id*self.shared_memory_size] = (np.int32)(message.data[13] << 24 | message.data[12] << 16 
+                                self.shared_memory[0x07 + self.id*self.shared_memory_size] = (np.int32)(message.data[9] << 8 | message.data[8])
+                                self.shared_memory[0x08 + self.id*self.shared_memory_size] = (np.int32)(message.data[13] << 24 | message.data[12] << 16 
                                                                 | message.data[11] << 8 | message.data[10])
-                                self.shared_memory[9 + self.id*self.shared_memory_size] = (np.int32)(message.data[14])
-                                self.shared_memory[10 + self.id*self.shared_memory_size] = (np.int32)(message.data[15] << 8 | message.data[16]) #RPM
-                                self.shared_memory[11 + self.id*self.shared_memory_size] = (np.int32)(message.data[17] << 8 | message.data[18]) #load cell
+                                self.shared_memory[0x09 + self.id*self.shared_memory_size] = (np.int32)(message.data[14])
+                                self.shared_memory[0x0A + self.id*self.shared_memory_size] = (np.int32)(message.data[15] << 8 | message.data[16]) #RPM
+                                self.shared_memory[0x0B + self.id*self.shared_memory_size] = (np.int32)(message.data[17] << 8 | message.data[18]) #load cell
                                 
-                                self.shared_memory[12 + self.id*self.shared_memory_size] = (np.int32)(message.data[19] << 8 | message.data[20]) #Ext Temp1
-                                self.shared_memory[13 + self.id*self.shared_memory_size] = (np.int32)(message.data[21] << 8 | message.data[22]) #Ext Humi1
-                                self.shared_memory[14 + self.id*self.shared_memory_size] = (np.int32)(message.data[23] << 8 | message.data[24]) #Ext Temp2
-                                self.shared_memory[15 + self.id*self.shared_memory_size] = (np.int32)(message.data[25] << 8 | message.data[26]) #Ext Humi2
+                                self.shared_memory[0x0C + self.id*self.shared_memory_size] = (np.int32)(message.data[19] << 8 | message.data[20]) #Ext Temp1
+                                self.shared_memory[0x0D + self.id*self.shared_memory_size] = (np.int32)(message.data[21] << 8 | message.data[22]) #Ext Humi1
+                                self.shared_memory[0x0E + self.id*self.shared_memory_size] = (np.int32)(message.data[23] << 8 | message.data[24]) #Ext Temp2
+                                self.shared_memory[0x0F + self.id*self.shared_memory_size] = (np.int32)(message.data[25] << 8 | message.data[26]) #Ext Humi2
                                 self.unit_semaphor.release()
                                 
-                                self.shared_memory[16 + self.id*self.shared_memory_size] = float(f'{(inclination1 * self.shared_memory[0 + self.id*self.shared_memory_size] - y_offset1) * 100 : 0.2F}')
-                                self.shared_memory[17 + self.id*self.shared_memory_size] = float(f'{(inclination2 * self.shared_memory[1 + self.id*self.shared_memory_size] - y_offset2) * 100 : 0.2F}')
-                                # self.shared_memory[18 + self.id*self.shared_memory_size] = float(f'{(inclination3 * self.shared_memory[2 + self.id*self.shared_memory_size] - y_offset3) * 100 : 0.2F}')
-                                # self.shared_memory[19 + self.id*self.shared_memory_size] = float(f'{(inclination4 * self.shared_memory[3 + self.id*self.shared_memory_size] - y_offset4) * 100 : 0.2F}')
+                                self.shared_memory[0x10 + self.id*self.shared_memory_size] = float(f'{(inclination1 * self.shared_memory[0 + self.id*self.shared_memory_size] - y_offset1) * 100 : 0.2F}')
+                                self.shared_memory[0x11 + self.id*self.shared_memory_size] = float(f'{(inclination2 * self.shared_memory[1 + self.id*self.shared_memory_size] - y_offset2) * 100 : 0.2F}')
+                                # self.shared_memory[0x12 + self.id*self.shared_memory_size] = float(f'{(inclination3 * self.shared_memory[2 + self.id*self.shared_memory_size] - y_offset3) * 100 : 0.2F}')
+                                # self.shared_memory[0x13 + self.id*self.shared_memory_size] = float(f'{(inclination4 * self.shared_memory[3 + self.id*self.shared_memory_size] - y_offset4) * 100 : 0.2F}')
                                     
-                                if command['send'] and self.socket[0]:
+                                if command['SEND'] and self.socket[0]:
                                     self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!", 
-                                        "TEMP1" : f'{self.shared_memory[16 + self.id*self.shared_memory_size] * 0.01: 0.2F}',
-                                        "TEMP2" : f'{self.shared_memory[17 + self.id*self.shared_memory_size] * 0.01: 0.2F}',
-                                        "GPO4~GPO1": f'{self.shared_memory[6 + self.id*self.shared_memory_size]}',
-                                        "GPO8~GPO5": f'{self.shared_memory[7 + self.id*self.shared_memory_size]}',
-                                        "GPI4~GPI1": f'{self.shared_memory[8 + self.id*self.shared_memory_size]}',
-                                        "GPI8~GPI5": f'{self.shared_memory[9 + self.id*self.shared_memory_size]}',
-                                        "RPM": f'{self.shared_memory[10 + self.id*self.shared_memory_size]}',
-                                        "LOAD CELL": f'{self.shared_memory[11 + self.id*self.shared_memory_size] * 0.01 : 0.2F}kg',
-                                        "EXTTEMP1": f'{self.shared_memory[12 + self.id*self.shared_memory_size] * 0.01 : 0.2F}C',
-                                        "EXTHUMI1": f'{self.shared_memory[13 + self.id*self.shared_memory_size] * 0.01 : 0.2F}%',
-                                        "EXTTEMP2": f'{self.shared_memory[14 + self.id*self.shared_memory_size] * 0.01 : 0.2F}C',
-                                        "EXTHUMI2": f'{self.shared_memory[15 + self.id*self.shared_memory_size] * 0.01 : 0.2F}%',
+                                        "TEMP1" : f'{self.shared_memory[0x10 + self.id*self.shared_memory_size] * 0.01: 0.2F}',
+                                        "TEMP2" : f'{self.shared_memory[0x11 + self.id*self.shared_memory_size] * 0.01: 0.2F}',
+                                        "GPO4~GPO1": f'{self.shared_memory[0x06 + self.id*self.shared_memory_size]}',
+                                        "GPO8~GPO5": f'{self.shared_memory[0x07 + self.id*self.shared_memory_size]}',
+                                        "GPI4~GPI1": f'{self.shared_memory[0x08 + self.id*self.shared_memory_size]}',
+                                        "GPI8~GPI5": f'{self.shared_memory[0x09 + self.id*self.shared_memory_size]}',
+                                        "RPM": f'{self.shared_memory[0x0A + self.id*self.shared_memory_size]}',
+                                        "LOAD CELL": f'{self.shared_memory[0x0B + self.id*self.shared_memory_size] * 0.01 : 0.2F}kg',
+                                        "EXTTEMP1": f'{self.shared_memory[0x0C + self.id*self.shared_memory_size] * 0.01 : 0.2F}C',
+                                        "EXTHUMI1": f'{self.shared_memory[0x0D + self.id*self.shared_memory_size] * 0.01 : 0.2F}%',
+                                        "EXTTEMP2": f'{self.shared_memory[0x0E + self.id*self.shared_memory_size] * 0.01 : 0.2F}C',
+                                        "EXTHUMI2": f'{self.shared_memory[0x0F + self.id*self.shared_memory_size] * 0.01 : 0.2F}%',
                                         }), 'UTF-8'))
                             else:
                                 self.logging.warning(f'id : {self.id + 1} unit board is wrong response')
                         else:
                             self.logging.warning(f'id : {self.id + 1} unit board is not response') 
-                    elif command['cmd'] == 'START_TEMP':
+                    elif command['CMD'] == 'START_TEMP':
                         self.event.set()
                         g_temp_control_start = True
                         
                         if self.socket[0]:
                             self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!"}), 'UTF-8'))
-                    elif command['cmd'] == 'STOP_TEMP':
+                    elif command['CMD'] == 'STOP_TEMP':
                         g_temp_control_start = False
                         
                         if self.socket[0]:
                             self.socket[0].sendall(bytes(json.dumps({"id" : f'{self.id + 1}', "status":"success!"}), 'UTF-8'))
-                    elif command['cmd'] == 'TEMP_RPM':
+                    elif command['CMD'] == 'TEMP_RPM':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x17, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
 
-                        temp = int(command['speed'])
+                        temp = int(command['SPEED'])
                         message.data[5] = temp & 0xff               # big endian
                         message.data[4] = (temp >> 8) & 0xff        # big endian
-                        if command['dir'] == 'FW':
+                        if command['DIR'] == 'FW':
                             message.data[6] = 1
                         else:
                             message.data[6] = 0
-                        if command['onoff'] == 'ON':
+                        if command['ONOFF'] == 'ON':
                             message.data[7] = 1
                         else:
                             message.data[7] = 0
                         
-                        temp = int(command['time'])
+                        temp = int(command['TIME'])
                         message.data[9] = temp & 0xff               # big endian
                         message.data[8] = (temp >> 8) & 0xff        # big endian
                              
@@ -477,12 +494,12 @@ class UnitBoard:
                                 self.logging.warning(f'id : {self.id + 1} unit board is wrong response')  
                         else:
                             self.logging.warning(f'id : {self.id + 1} unit board is not response')   
-                    elif command['cmd'] == 'TEMP_VALVE':
+                    elif command['CMD'] == 'TEMP_VALVE':
                         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+self.id,  
                                     data=[0xF2, 0x18, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
 
-                        message.data[4] = int(command['channel'])             
-                        message.data[5] = command['value']
+                        message.data[4] = int(command['CHANNEL'])             
+                        message.data[5] = command['VALUE']
                              
                         while not self.can_fd_receive_queue.empty():
                             self.can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.

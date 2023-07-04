@@ -30,7 +30,9 @@ GPIOADDR = 0x20
 MAXUNITBOARD = 1
    
 class CosmoMain(threading.Thread):
-    def __init__(self, tcp_queue) -> None:
+    def __init__(self, tcp_queue, common_config) -> None:
+        global GPIOADDR, MAXUNITBOARD
+        
         threading.Thread.__init__(self) 
         os.system("sudo ifconfig can0 down")
         time.sleep(0.1)
@@ -40,6 +42,9 @@ class CosmoMain(threading.Thread):
         
         self.client = None
         self.tcp_queue = tcp_queue
+        self.common_config = common_config['common']
+        MAXUNITBOARD = int(self.common_config['MAXUNITBOARD'])
+        GPIOADDR = int(self.common_config['GPIOADDR'])
         
         filters = [
             {"can_id": 0x300, "can_mask": 0x7FF, "extended": False},
@@ -76,54 +81,64 @@ class CosmoMain(threading.Thread):
     def run(self):
         while True:   
             message = self.tcp_queue.get()  
-            if  message['cmd'] != 'GET_STATUS': 
-                logging.info(f"{message['cmd']} command is inserted to {message['unit_id']} Unit Board")
+            if  message['CMD'] != 'GET_STATUS':         # GET_STATUS는 계속 호출 되므로 log에 출력 하지 않음.
+                logging.info(f"{message['CMD']} command is inserted to {message['UNIT_ID']} Unit Board")
             
-            if message['cmd'] == 'SET_MOTOR':
-                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
-                    self.command_queue[message['unit_id'] - 1].put(message)
+            # UNIT_ID는 관리 프로그램과 협의해서 변경해야 함.
+            if message['CMD'] == 'STATE':
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    for x in range(MAXUNITBOARD):
+                        self.command_queue[message['UNIT_ID'] - 1 + x].put(message)
                 else:
-                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            elif message['cmd'] == 'SET_GPIO':
-                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
-                    self.command_queue[message['unit_id'] - 1].put(message)
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'REF':
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
                 else:
-                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            elif message['cmd'] == 'GET_ADC':  
-                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
-                    self.command_queue[message['unit_id'] - 1].put(message)
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'SET_MOTOR':
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
                 else:
-                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            elif message['cmd'] == 'GET_STATUS':  
-                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
-                    self.command_queue[message['unit_id'] - 1].put(message)
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'SET_GPIO':
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
                 else:
-                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            elif message['cmd'] == 'START_TEMP':
-                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
-                    self.command_queue[message['unit_id'] - 1].put(message)
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'GET_ADC':  
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
                 else:
-                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            elif message['cmd'] == 'STOP_TEMP':
-                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
-                    self.command_queue[message['unit_id'] - 1].put(message)
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'GET_STATUS':  
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
                 else:
-                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            elif message['cmd'] == 'TEMP_RPM':
-                if message['unit_id'] > 0 and message['unit_id'] <= MAXUNITBOARD:
-                    self.command_queue[message['unit_id'] - 1].put(message)
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'START_TEMP':
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
                 else:
-                    logging.info(f"Wrong Unit board id{message['unit_id'] - 1}")
-            # self.unit_semaphor.acquire()
-            # self.unit_np_shm[0] = self.unit_np_shm[0] + 1
-            # self.unit_semaphor.release()
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'STOP_TEMP':
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
+                else:
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+            elif message['CMD'] == 'TEMP_RPM':
+                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
+                    self.command_queue[message['UNIT_ID'] - 1].put(message)
+                else:
+                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+        
             
 def main():
-    tcp_queue = queue.Queue(maxsize=128)
-    main_func = CosmoMain(tcp_queue)
-    
     config_file = configparser.ConfigParser()  ## 클래스 객체 생성
     config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')  ## 파일 읽기
+   
+    tcp_queue = queue.Queue(maxsize=128)
+    main_func = CosmoMain(tcp_queue, common_config)
 
     # main_func.config_file = Config("/home/pi/Projects/cosmo-m/config/config.ini")      # For VSC
     common_config = config_file['common']
