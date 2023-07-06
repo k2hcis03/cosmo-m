@@ -6,7 +6,7 @@ from pprint import pprint
 import json
 import time
 import socket
-HOST = '192.168.0.18'
+HOST = '192.168.0.28'
 PORT = 9529
 
 class SingleTCPHandler(socketserver.BaseRequestHandler):
@@ -19,11 +19,11 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
         # json 서버 테스트
         # @K2H
         # 기본 동작은 아래 while문이 동작되고 이 문은 주석처리 되어야 함.
-        # while True:
-        #     data = self.request.recv(4096)  # clip input at 1Kb
-        #     text = data.decode('utf-8')
-        #     print('\n')
-        #     pprint(json.loads(text))
+        while True:
+            data = self.request.recv(4096)  # clip input at 1Kb
+            text = data.decode('utf-8')
+            print('\n')
+            pprint(json.loads(text))
         ############################################################################################
         
         self.request.settimeout(5.0)

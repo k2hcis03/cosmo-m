@@ -42,9 +42,9 @@ class CosmoMain(threading.Thread):
         
         self.client = None
         self.tcp_queue = tcp_queue
-        self.common_config = common_config['common']
+        self.common_config = common_config  #['common']
         MAXUNITBOARD = int(self.common_config['MAXUNITBOARD'])
-        GPIOADDR = int(self.common_config['GPIOADDR'])
+        GPIOADDR = int(self.common_config['GPIOADDR'], 16)
         
         filters = [
             {"can_id": 0x300, "can_mask": 0x7FF, "extended": False},
@@ -136,13 +136,12 @@ class CosmoMain(threading.Thread):
 def main():
     config_file = configparser.ConfigParser()  ## 클래스 객체 생성
     config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')  ## 파일 읽기
-   
+   # main_func.config_file = Config("/home/pi/Projects/cosmo-m/config/config.ini")      # For VSC
+    common_config = config_file['common']
+    
     tcp_queue = queue.Queue(maxsize=128)
     main_func = CosmoMain(tcp_queue, common_config)
 
-    # main_func.config_file = Config("/home/pi/Projects/cosmo-m/config/config.ini")      # For VSC
-    common_config = config_file['common']
-    
     global MAXUNITBOARD, ADDRESS
     MAXUNITBOARD = int(common_config['MAXUNITBOARD'])
     GPIOADDR = int(common_config['GPIOADDR'], 16)
