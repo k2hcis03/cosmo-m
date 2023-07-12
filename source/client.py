@@ -19,7 +19,6 @@ class UnitBoardGetStatus(threading.Thread):
         self.logging = logging
         self.event = event
         self.tcp_queue = tcp_queue
-        self.client = client
         self.max_unit_board = max_unit_board
         self.shared_memory = shared_memory
         self.send_index = 0
@@ -27,37 +26,32 @@ class UnitBoardGetStatus(threading.Thread):
         self.config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')  ## 파일 읽기
     
         self.send_data = []
+        self.order = 0
         self.make_json_data()
-        
         logging.info(f'status read thread  is running') 
         
     def make_json_data(self):
         common_config = self.config_file['common']
         size = int(common_config['SHARED_MEMORY_SIZE'])
   
-        if self.send_index >= 1000000:
-            self.send_index = 0
+        if self.order >= 1000000:
+            self.order = 0
             
         self.send_data = {
-            # "INDEX":f"{self.send_index}",
-            "INDEX":[],
+            "ORDER": f"{self.order}",
             "DATE":f"{time.strftime('%Y-%m-%d', time.localtime(time.time()))}",
             "TIME":f"{time.strftime('%H:%M:%S')}",
             "VALUES":[],
-            "STATUS":[],
-            "CODE":{"CODE":1000,"MSG":"OK"}
+            "STATE":[],
+            # "CODE":{"CODE":1000,"MSG":"OK"}
         }
         temp_index = [16, 17, 12, 14]           #온도 값이 저장되는 shared_memory 위치
         humi_index = [13, 15]                   #습도 값이 저장되는 shared_memory 위치
         co2_index = [13, 15]                    #Co2 값이 저장되는 shared_memory 위치
-        self.send_index += 1
+        self.order += 1
                             
         for i in range(int(common_config['FERMEN_TANK'])):
             unit_config = self.config_file[f'unit_board{i+1}']
-            
-            index_number = self.shared_memory[i*size+0x17]
-            self.shared_memory[i*size+0x17] = self.shared_memory[i*size+0x17] + 1
-            self.send_data['INDEX'].append({"TANK_ID":f'{100+i}',"INDEX": f'{index_number}'})
             
             for x in range(int(unit_config['TEMP_NUM'])):
                 self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[i*size+temp_index[x]]*0.01:0.2F}"})
@@ -86,16 +80,15 @@ class UnitBoardGetStatus(threading.Thread):
                 status = "Initial"
             elif self.shared_memory[i*size+0x18] & 0x000000FF == 5:
                 status = "Error"
-            self.send_data['STATUS'].append({"TANK_ID":f'{100+i}',"STAGE":f'{stage}',"STATUS":status}) 
+                
+            index_number = self.shared_memory[i*size+0x17]
+            self.shared_memory[i*size+0x17] = self.shared_memory[i*size+0x17] + 1
+            self.send_data['STATE'].append({"TANK_ID":f'{100+i}',"STAGE":f'{stage}',"STATUS":status, "INDEX":f'{index_number}'}) 
             
         cnt = int(common_config['FERMEN_TANK'])
         
         for i in range(int(common_config['BLEND_TANK'])):
             unit_config = self.config_file[f'unit_board{cnt+1}']
-            
-            index_number = self.shared_memory[(i+cnt)*size+0x17]
-            self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1
-            self.send_data['INDEX'].append({"TANK_ID":200+i,"INDEX": f'{index_number}'})
             
             for x in range(int(unit_config['TEMP_NUM'])):
                 self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+temp_index[x]]*0.01:0.2F}"})
@@ -124,15 +117,14 @@ class UnitBoardGetStatus(threading.Thread):
                 status = "Initial"
             elif self.shared_memory[(i+cnt)*size+0x18] & 0x000000FF == 5:
                 status = "Error"
-            self.send_data['STATUS'].append({"TANK_ID":f'{200+i}',"STAGE":f'{stage}',"STATUS":status})
-            
-        cnt = int(common_config['FERMEN_TANK']) + int(common_config['BLEND_TANK'])  
-        for i in range(int(common_config['PROD_TANK'])):
-            unit_config = self.config_file[f'unit_board{cnt+1}']
             
             index_number = self.shared_memory[(i+cnt)*size+0x17]
             self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1
-            self.send_data['INDEX'].append({"TANK_ID":f'{300+i}',"INDEX": f'{index_number}'})
+            self.send_data['STATE'].append({"TANK_ID":f'{200+i}',"STAGE":f'{stage}',"STATUS":status, "INDEX":f'{index_number}'}) 
+                        
+        cnt = int(common_config['FERMEN_TANK']) + int(common_config['BLEND_TANK'])  
+        for i in range(int(common_config['PROD_TANK'])):
+            unit_config = self.config_file[f'unit_board{cnt+1}']
             
             for x in range(int(unit_config['TEMP_NUM'])):
                 self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+temp_index[x]]*0.01:0.2F}"})
@@ -161,15 +153,14 @@ class UnitBoardGetStatus(threading.Thread):
                 status = "Initial"
             elif self.shared_memory[(i+cnt)*size+0x18] & 0x000000FF == 5:
                 status = "Error"
-            self.send_data['STATUS'].append({"TANK_ID":300+i,"STAGE":f'{stage}',"STATUS":status})
+            
+            index_number = self.shared_memory[(i+cnt)*size+0x17]
+            self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1            
+            self.send_data['STATUS'].append({"TANK_ID":300+i,"STAGE":f'{stage}',"STATUS":status, "INDEX":f'{index_number}'})
             
         cnt = int(common_config['FERMEN_TANK']) + int(common_config['BLEND_TANK']) + int(common_config['PROD_TANK'])   
         for i in range(int(common_config['CHILER_TANK'])):
             unit_config = self.config_file[f'unit_board{cnt+1}']
-            
-            index_number = self.shared_memory[(i+cnt)*size+0x17]
-            self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1
-            self.send_data['INDEX'].append({"TANK_ID":f'{400+i}',"INDEX": f'{index_number}'})
             
             for x in range(int(unit_config['TEMP_NUM'])):
                 self.send_data['VALUES'].append({"TANK_ID":f'{400+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+temp_index[x]]*0.01:0.2F}"})
@@ -198,38 +189,50 @@ class UnitBoardGetStatus(threading.Thread):
                 status = "Initial"
             elif self.shared_memory[(i+cnt)*size+0x18] & 0x000000FF == 5:
                 status = "Error"
-            self.send_data['STATUS'].append({"TANK_ID":f'{400+i}',"STAGE":f'{stage}',"STATUS":status})
+                
+            index_number = self.shared_memory[(i+cnt)*size+0x17]
+            self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1            
+            self.send_data['STATUS'].append({"TANK_ID":f'{400+i}',"STAGE":f'{stage}',"STATUS":status,"INDEX": f'{index_number}'})
                     
     def run(self):
+        common_config = self.config_file['common']
+        
+        ip = common_config['HOST']
+        port = int(common_config['PORT1']) 
+        SERVER_ADDR = (ip, port)
+        
         while True:
-            try:  
-                if self.event.is_set():
-                    self.event.clear()
-                    break
-                for x in range(self.max_unit_board):            # 유닛보드마다 1초마다 get_status명령어 수행
-                    data = {"UNIT_ID" : x + 1, "CMD":"GET_STATUS", "SEND" : False}
-                    self.tcp_queue.put(data)
-                    time.sleep(0.1)
-                self.make_json_data()   
-                time.sleep(0.5)                                 # shared memory에서 지연시간이 없으면 문제 발생 
-                ######################################################################################################  
-                # 2023-06619-@K2H 
-                # 서버에 데이터를 전송하기 전에 필요 데이터 정렬
-                if not self.client._closed:
-                    self.client.sendall(bytes(json.dumps(self.send_data), 'UTF-8')) 
-                ######################################################################################################
-                time.sleep(1)             
+            try: 
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+                    client.connect(SERVER_ADDR)
+                    self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
+                    
+                    while True:
+                        if self.event.is_set():
+                            self.event.clear()
+                            return
+                        for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
+                            data = {"UNIT_ID" : x + 1, "CMD":"GET_STATUS", "SEND" : False}
+                            self.tcp_queue.put(data)
+                            time.sleep(0.1)
+                        self.make_json_data()   
+                        time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
+                        ######################################################################################################  
+                        # 2023-06619-@K2H 
+                        # 서버에 데이터를 전송하기 전에 필요 데이터 정렬
+                        if not client._closed:
+                            client.sendall(bytes(json.dumps(self.send_data), 'UTF-8')) 
+                        ######################################################################################################
+                        time.sleep(1)             
             except Exception as e:
                 time.sleep(0.5)
                 print(e)
                     
 class TcpClientThread(threading.Thread):
-    def __init__(self, ip, port, tcp_queue, logging, GPIOADDR, shared_object, 
+    def __init__(self, tcp_queue, logging, GPIOADDR, shared_object, 
                  i2c_semaphor, MAXUNITBOARD, shm_name, unit_np_shm):
         threading.Thread.__init__(self)
         self.daemon = True
-        self.ip = ip
-        self.port = port
         self.logging = logging
         self.tcp_queue = tcp_queue
         self.shared_object = shared_object
@@ -246,12 +249,19 @@ class TcpClientThread(threading.Thread):
     
     def run(self):
             self.logging.info('클라이언트 동작')
-            SERVER_ADDR = (self.ip, self.port)
+            
+            config_file = configparser.ConfigParser()                           ## 클래스 객체 생성
+            config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')     ## 파일 읽기
+            common_config = config_file['common']
+            
+            ip = common_config['HOST']
+            port = int(common_config['PORT2'])               
+            SERVER_ADDR = (ip, port)
             while True:
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                         client.connect(SERVER_ADDR)
-                        self.logging.info(f'서버에 연결 되었습니다.{client}')
+                        self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
                         
                         if self.status_thread and self.status_thread.is_alive():
                             self.event.set()        #기존 쓰레드 소멸
@@ -277,7 +287,6 @@ class TcpClientThread(threading.Thread):
                         while True:
                             data = json.loads(client.recv(1024).decode('UTF-8'))
                             self.tcp_queue.put(data)
-                            # self.client.sendall(bytes(json.dumps({"status":"success!"}), 'UTF-8'))
                 except Exception as e:
                     client.close()
                     time.sleep(0.5)

@@ -30,7 +30,7 @@ GPIOADDR = 0x20
 MAXUNITBOARD = 1
    
 class CosmoMain(threading.Thread):
-    def __init__(self, tcp_queue, common_config) -> None:
+    def __init__(self, tcp_queue, config_file) -> None:
         global GPIOADDR, MAXUNITBOARD
         
         threading.Thread.__init__(self) 
@@ -42,9 +42,10 @@ class CosmoMain(threading.Thread):
         
         self.client = None
         self.tcp_queue = tcp_queue
-        self.common_config = common_config  #['common']
-        MAXUNITBOARD = int(self.common_config['MAXUNITBOARD'])
-        GPIOADDR = int(self.common_config['GPIOADDR'], 16)
+        self.common_config = config_file
+        common_config = self.common_config['common']
+        MAXUNITBOARD = int(common_config['MAXUNITBOARD'])
+        GPIOADDR = int(common_config['GPIOADDR'], 16)
         
         filters = [
             {"can_id": 0x300, "can_mask": 0x7FF, "extended": False},
@@ -86,16 +87,16 @@ class CosmoMain(threading.Thread):
             
             # UNIT_ID는 관리 프로그램과 협의해서 변경해야 함.
             if message['CMD'] == 'STATE':
-                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
-                    for x in range(MAXUNITBOARD):
-                        self.command_queue[message['UNIT_ID'] - 1 + x].put(message)
-                else:
-                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+                for x in range(MAXUNITBOARD):
+                    self.command_queue[x].put(message)
             elif message['CMD'] == 'REF':
-                if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
-                    self.command_queue[message['UNIT_ID'] - 1].put(message)
-                else:
-                    logging.info(f"Wrong Unit board id{message['UNIT_ID'] - 1}")
+                for x in range(MAXUNITBOARD):
+                    config = self.common_config[f'unit_board{"common"}']
+                    if message['TANK_ID'] == config['TANK_ID']:
+                        # self.command_queue[message['UNIT_ID'] - 1].put(message)
+                        self.command_queue[x].put(message)
+                    else:
+                        logging.info(f"Wrong Unit board id{message['TANK_ID'] - 1}")
             elif message['CMD'] == 'SET_MOTOR':
                 if message['UNIT_ID'] > 0 and message['UNIT_ID'] <= MAXUNITBOARD:
                     self.command_queue[message['UNIT_ID'] - 1].put(message)
@@ -136,18 +137,17 @@ class CosmoMain(threading.Thread):
 def main():
     config_file = configparser.ConfigParser()  ## 클래스 객체 생성
     config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')  ## 파일 읽기
-   # main_func.config_file = Config("/home/pi/Projects/cosmo-m/config/config.ini")      # For VSC
     common_config = config_file['common']
     
     tcp_queue = queue.Queue(maxsize=128)
-    main_func = CosmoMain(tcp_queue, common_config)
+    main_func = CosmoMain(tcp_queue, config_file)
 
     global MAXUNITBOARD, ADDRESS
     MAXUNITBOARD = int(common_config['MAXUNITBOARD'])
     GPIOADDR = int(common_config['GPIOADDR'], 16)
     
     ip = common_config['HOST']
-    port = int(common_config['PORT'])   
+    port = int(common_config['PORT2'])   
     manager = Manager()
     
     can_fd_receive = canfd.CanFDReceive(logging, main_func)
@@ -172,7 +172,7 @@ def main():
     main_func.unit_semaphor = manager.Semaphore(1) 
     main_func.start()
     
-    main_func.client = tcp_client(ip, port, tcp_queue, logging, GPIOADDR, shared_object, i2c_semaphor, MAXUNITBOARD, 
+    main_func.client = tcp_client(tcp_queue, logging, GPIOADDR, shared_object, i2c_semaphor, MAXUNITBOARD, 
                                   shm.name, main_func.unit_np_shm)
     main_func.client.start()                            #tcp client 시작
     unitboard.g_file_path = common_config['JSON_FILE']
@@ -180,11 +180,11 @@ def main():
         while True:
             if shared_object[0] and not shared_object[0]._closed:           #처음 서버에 연결 될 때까지 무한루프 실행
                 with ProcessPoolExecutor(max_workers=20) as executor:
-                    unit_func = unit_board(logging, can_fd_transmitte.queue, shared_object, GPIOADDR, i2c_semaphor)
+                    unit_func = unit_board(can_fd_transmitte.queue, shared_object, GPIOADDR, i2c_semaphor)
                     
                     furtures = {executor.submit(unit_func.unit_process, i, shm.name, main_func.unit_np_shm, 
                                                 main_func.unit_semaphor, can_fd_receive.receive_queue[i],
-                                                main_func.command_queue[i]) : i for i in range(MAXUNITBOARD)}
+                                                main_func.command_queue[i], logging) : i for i in range(MAXUNITBOARD)}
                     for furture in as_completed(furtures):  
                         print("All Process is done")
                     sys.exit(1)
