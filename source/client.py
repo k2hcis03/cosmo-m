@@ -61,6 +61,7 @@ class UnitBoardGetStatus(threading.Thread):
                 self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{300+x}',"VALUE":f"{self.shared_memory[i*size+co2_index[x]]*0.01:0.2F}"})
             for x in range(int(unit_config['LOAD_CELL'])):
                 self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{self.shared_memory[i*size+11]*0.01:0.2F}"})
+                # self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{100}"})
             for x in range(int(unit_config['VALVE_NUM'])):
                 self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{500+x}',"VALUE":
                     f"{(self.shared_memory[i*size+6] & (0x000000FF << x*8)) >> x*8}"})
@@ -212,7 +213,7 @@ class UnitBoardGetStatus(threading.Thread):
                             self.event.clear()
                             return
                         for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
-                            data = {"UNIT_ID" : x + 1, "CMD":"GET_STATUS", "SEND" : False}
+                            data = {"UNIT_ID" : x, "CMD":"GET_STATUS", "SEND" : False}
                             self.tcp_queue.put(data)
                             time.sleep(0.1)
                         self.make_json_data()   
@@ -282,11 +283,23 @@ class TcpClientThread(threading.Thread):
                         self.status_thread = UnitBoardGetStatus(self.logging, self.event, self.tcp_queue, self.client_socket, 
                                                                 self.max_unit_board, self.shared_memory)
                         
-                        self.status_thread.start()            #테스트용으로 주석 처리하고 동작 시, 주석 해제.
-                        
+                        self.status_thread.start()            #테스트 용으로 주석 처리하고 동작 시, 주석 해제.
+                        # data = bytearray()
                         while True:
-                            data = json.loads(client.recv(1024).decode('UTF-8'))
+                            data = bytearray()
+                            while True:
+                                part = client.recv(1024)
+                                data += part
+                                if len(part) < 1024:
+                                    # either 0 or end of data
+                                    break
+                                # data = json.loads(data.decode('UTF-8'))
+                                # data = json.loads(client.recv(32768).decode('UTF-8'))
+                                # self.tcp_queue.put(data)
+                            print(bytes(data))
+                            data = json.loads(bytes(data).decode('UTF-8'))
                             self.tcp_queue.put(data)
+                            time.sleep(0.01)
                 except Exception as e:
                     client.close()
                     time.sleep(0.5)

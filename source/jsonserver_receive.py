@@ -33,7 +33,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                 NUM = int(input("\n명령어를 넣어 주세요 1=MOTOR, 2=SET GPIO, 3=GET_ADC, 4=GET_STATUS, 5 = START_TEMP 6 = STOP_TEMP: 7=TEMP_RPM: "))
                 # print(NUM)
                 if NUM == 1:
-                    self.request.send(bytes(json.dumps({"UNIT_ID" : 1,
+                    self.request.send(bytes(json.dumps({"UNIT_ID" : 0,
                                                     "CMD":"SET_MOTOR",
                                                     "SPEED" : 200, 
                                                     "DIR"   : 'FW',            #FW = forward, RV = reverse
@@ -47,7 +47,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                         print("Time out")
                         
                 elif NUM == 2:
-                    self.request.send(bytes(json.dumps({"UNIT_ID" : 1,
+                    self.request.send(bytes(json.dumps({"UNIT_ID" : 0,
                                                     "CMD":"SET_GPIO",
                                                     "NUM" : [0, 1, 2, 3], 
                                                     "VALUE" : [False, False, False, False]}), 'UTF-8'))
@@ -59,7 +59,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                     except socket.timeout:
                         print("Time out")
                 elif NUM == 3:
-                    self.request.send(bytes(json.dumps({"UNIT_ID" : 1,
+                    self.request.send(bytes(json.dumps({"UNIT_ID" : 0,
                                                     "CMD":"GET_ADC",
                                                     "NUM" : [0, 1, 2, 3, 4, 5]}), 'UTF-8'))     
                     try:
@@ -70,7 +70,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                     except socket.timeout:
                         print("Time out")
                 elif NUM == 4:
-                    self.request.send(bytes(json.dumps({"UNIT_ID" : 1,
+                    self.request.send(bytes(json.dumps({"UNIT_ID" : 0,
                                                         "CMD":"GET_STATUS",
                                                         "SEND" : True, 
                                                         "RAW" : True}), 'UTF-8'))
@@ -82,7 +82,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                     except socket.timeout:
                         print("Time out")
                 elif NUM == 5:
-                    self.request.send(bytes(json.dumps({"UNIT_ID" : 1,
+                    self.request.send(bytes(json.dumps({"UNIT_ID" : 0,
                                                     "CMD":"START_TEMP",  
                                                     "MODE" : 'BOTH',
                                                     "TIMEOUT" : 28800}), 'UTF-8'))   #BOTH --> VALUE & motor, MOTOR --> motor, 
@@ -95,7 +95,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                     except socket.timeout:
                         print("Time out")
                 elif NUM == 6:
-                    self.request.send(bytes(json.dumps({"UNIT_ID" : 1,
+                    self.request.send(bytes(json.dumps({"UNIT_ID" : 0,
                                                     "CMD":"STOP_TEMP",  
                                                     "TIMEOUT" : 28800}), 'UTF-8'))   #BOTH --> VALUE & motor, MOTOR --> motor, 
                                                                                     #VALVE --> valve, time --> sec
@@ -107,7 +107,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                     except socket.timeout:
                         print("Time out")
                 elif NUM == 7:
-                    self.request.send(bytes(json.dumps({"UNIT_ID" : 1,
+                    self.request.send(bytes(json.dumps({"UNIT_ID" : 0,
                                                     "CMD":"TEMP_RPM",
                                                     "SPEED" : 100, 
                                                     "DIR"   : 'FW',            #FW = forward, RV = reverse
