@@ -5,7 +5,6 @@ import time
 
 from concurrent.futures import ThreadPoolExecutor
 import threading
-import time
 
 class CanFDReceive(threading.Thread):
     def __init__(self, logging, main_func) -> None:

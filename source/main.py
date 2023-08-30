@@ -12,7 +12,6 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import Process, current_process, Queue, Manager, shared_memory
 import threading
-import time
 import canfd
 import queue
 from concurrent.futures import wait
@@ -83,11 +82,16 @@ class CosmoMain(threading.Thread):
         while True:   
             message = self.tcp_queue.get()  
             if  message['CMD'] != 'GET_STATUS':         # GET_STATUS는 계속 호출 되므로 log에 출력 하지 않음.
-                logging.info(f"{message['CMD']} command is inserted to {message['TANK_ID']} Unit Board")
-            
+                if message['CMD'] == 'REF':
+                    logging.info(f"{message['CMD']} command is inserted to {message['TANK_ID']} Unit Board")
+                elif message['CMD'] == 'STATE':
+                    logging.info(f"{message['CMD']} command is inserted Unit Board")
+                else:
+                    logging.info(f"{message['CMD']} command is inserted Unit Board")
             # UNIT_ID는 관리 프로그램과 협의해서 변경해야 함.
             if message['CMD'] == 'STATE':
                 for x in range(MAXUNITBOARD):
+                    message['UNIT_ID'] = str(int(message['DATA'][x]['TANK_ID']) - 100)
                     self.command_queue[x].put(message)
             elif message['CMD'] == 'REF':
                 matching = False
@@ -134,8 +138,17 @@ class CosmoMain(threading.Thread):
                     self.command_queue[message['UNIT_ID']].put(message)
                 else:
                     logging.info(f"Wrong Unit board id{message['UNIT_ID']}")
-        
-            
+            elif message['CMD'] == 'CTRL':
+                matching = False
+                for x in range(MAXUNITBOARD):
+                    config = self.common_config[f'unit_board{x}']
+                    if message['TANK_ID'] == config['TANK_ID']:
+                        message['UNIT_ID'] = str(int(message['TANK_ID']) - 100)
+                        self.command_queue[x].put(message)
+                        matching = True
+                if not matching:
+                    logging.info(f"Wrong Unit board id{message['TANK_ID']}")
+                    
 def main():
     config_file = configparser.ConfigParser()  ## 클래스 객체 생성
     config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')  ## 파일 읽기
@@ -157,12 +170,12 @@ def main():
     i2c_semaphor = manager.Semaphore(1) 
     
     can_fd_transmitte = canfd.CanFDTransmitte(logging, main_func)
-    can_fd_transmitte.queue = manager.Queue(128)
+    can_fd_transmitte.queue = manager.Queue(1024)
     can_fd_transmitte.start()
     
     for i in range(MAXUNITBOARD):
-        can_fd_receive.receive_queue.append(manager.Queue(128))
-        main_func.command_queue.append(manager.Queue(128))
+        can_fd_receive.receive_queue.append(manager.Queue(1024))
+        main_func.command_queue.append(manager.Queue(1024))
     
     # 숫자를 저장할 numpy 배열(1차원) 생성
     shared_mem_size = int(common_config['SHARED_MEMORY_SIZE'])
@@ -200,7 +213,6 @@ def main():
         for i in range(MAXUNITBOARD):
             os.kill(main_func.unit_np_shm[i*shared_mem_size + 29], signal.SIGKILL)
         print(e)
-        
 if __name__ == "__main__":
     main()
     

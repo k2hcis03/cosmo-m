@@ -6,7 +6,7 @@ from pprint import pprint
 import json
 import time
 import socket
-HOST = '192.168.0.28'
+HOST = '192.168.0.4'
 PORT = 7000
 
 class SingleTCPHandler(socketserver.BaseRequestHandler):
@@ -113,6 +113,7 @@ class SingleTCPHandler(socketserver.BaseRequestHandler):
                                                     "DIR"   : 'FW',            #FW = forward, RV = reverse
                                                     "ONOFF" : 'ON', 
                                                     "TIME" : 3600, 
+                                                    "SEND" : True,
                                                     "TIMEOUT" : 28800}), 'UTF-8'))   
                     try:
                         data = self.request.recv(1024)  # clip input at 1Kb
