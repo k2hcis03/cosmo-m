@@ -35,7 +35,7 @@ class UnitBoardTempControl(threading.Thread):
         self.logging = logging
         self.can_fd_transmitte_queue = can_fd_transmitte_queue
         self.event = event
-        self.pid_event = threading.Event()
+        self.pid_timer_event = threading.Event()
         self.command_queue = command_queue
         self.pid = PID_COSMO_M(Kp, Ki, Kd, setpoint=setpoint)
         # Set output limits (heating/cooling power)
@@ -45,16 +45,11 @@ class UnitBoardTempControl(threading.Thread):
         self.shared_memory_u = shared_memory
         self.shared_memory_size = shared_memory_size
         self.time_to_on = 0                 # Valve 릴레이가 ON되는 시간 변수
-        self.pid_call_time = 0              # pid 계산 시간 5초. 0.1초 단위이므로 50
+        self.pid_timer_call_time = 0        # pid or timer 계산 시간 5초. 0.1초 단위이므로 50
         self.unit_semaphor = unit_semaphor
         
-        self.current_temp1 = 0              # 상부
-        self.current_temp2 = 0              # 하부
         self.config = config
         
-        self.ref_temp = 0
-        self.ref_rpm = 0
-        self.ref_motor_time = False
         self.check_time = 0
         self.cold_valve_status = 0
         self.temp_control_start = False
@@ -68,6 +63,7 @@ class UnitBoardTempControl(threading.Thread):
         self.file_write = False             # CSV 파일을 새로 만들지 결정
         self.file_write_state = None        # CSV 파일 저장 조건 상태
         self.file_index = 0
+        self.timer_control_valve = False    # 타이머로 제어 할 때, 시간 마다 한 번만 제어 하기위한 변수
         
     def set_cold_valve(self, value):
         self.cold_valve_status = value
@@ -79,7 +75,7 @@ class UnitBoardTempControl(threading.Thread):
         self.command_queue.put(message) 
     
     def pid_task(self):    
-        if self.pid_call_time > 0 and self.temp_control_start:            
+        if self.pid_timer_call_time > 0 and self.temp_control_start:            
             if self.time_to_on:
                 self.time_to_on -= 1
                 if self.cold_valve_status == 0:
@@ -87,12 +83,32 @@ class UnitBoardTempControl(threading.Thread):
             else:
                 if self.cold_valve_status == 1:
                     self.set_cold_valve(OFF) 
-            self.pid_call_time -= 1
+            self.pid_timer_call_time -= 1
             Timer(0.1, self.pid_task).start()
         else:
             Timer(0.1, self.pid_task).cancel()
-            self.pid_event.set()
+            self.pid_timer_event.set()
             
+    def timer_task(self):    
+        if self.pid_timer_call_time > 0 and self.temp_control_start:            
+            if self.time_to_on > 0 and self.timer_control_valve:
+                self.time_to_on -= 1
+                if self.cold_valve_status == 0:
+                    self.set_cold_valve(ON)
+            else:
+                if self.cold_valve_status == 1:
+                    self.set_cold_valve(OFF) 
+                    self.timer_control_valve = False
+            self.pid_timer_call_time -= 1
+            Timer(1, self.timer_task).start()
+        else:
+            Timer(1, self.timer_task).cancel()
+            
+            if self.cold_valve_status == 1:
+                self.set_cold_valve(OFF) 
+            self.timer_control_valve = False
+            self.pid_timer_event.set()
+              
     def run(self):
             self.logging.info(f'id : {self.id} UnitBoard Temp Control Thread Run')
             while True:
@@ -109,7 +125,7 @@ class UnitBoardTempControl(threading.Thread):
                         try:
                             self.writer_csv = open(f"/home/pi/Projects/cosmo-m/data/pid_process{self.id}_{self.file_index}.csv", 'w', encoding='utf-8', newline='')
                             self.writer = csv.writer(self.writer_csv, delimiter=',')
-                            self.writer.writerow(['time'] + ['ref.temp'] + ['real temp'] + ['valve on time'])   
+                            self.writer.writerow(['time'] + ['ref.temp'] + ['real temp'] + ['valve on time']  + ['ext1 temp'] + ['ext1 humi'] + ['ext2 temp'] + ['ext2 humi'])   
                             self.file_write = False
                         except Exception as e:
                             print(e)
@@ -117,49 +133,64 @@ class UnitBoardTempControl(threading.Thread):
                     for x in range(self.ref_total):
                         if self.temp_control_start:
                             time_start = time.time()
-                            self.ref_temp = float(self.ref_data[x]["TEMP"])
-                            self.ref_rpm = int(self.ref_data[x]["M_RPM"])
-                            self.ref_motor_time = int(self.ref_data[x]["M_TIME"])
-                            self.ref_temp_error = float(self.ref_data[x]["TEMP_MGN"])
-                            self.pid.modify_setpoint(self.ref_temp)
+                            ref_temp = float(self.ref_data[x]["TEMP"])
+                            ref_rpm = int(self.ref_data[x]["M_RPM"])
+                            ref_motor_time = int(self.ref_data[x]["M_TIME"])
+                            ref_temp_error = float(self.ref_data[x]["TEMP_MGN"])
+                            self.pid.modify_setpoint(ref_temp)
                             
                             # 2023-08-11 테스트용으로 모터 RPM을 1000으로 수정
-                            # self.ref_rpm = 1000
+                            # ref_rpm = 1000
                             #################################################
                             message = {"UNIT_ID" : self.id,                  
                                         "CMD":"TEMP_RPM",
-                                        "SPEED" : self.ref_rpm, 
+                                        "SPEED" : ref_rpm, 
                                         "DIR"   : 'FW',            #FW = forward, RV = reverse
                                         "ONOFF" : 'ON', 
-                                        "TIME" : self.ref_motor_time,
+                                        "TIME" : ref_motor_time,
                                         "SEND" : False}    
                             self.command_queue.put(message) 
                             self.logging.info(f"{message['CMD']} command is inserted Unit Board")
                             # self.logging.info(f'id : {self.id} UnitBoard Temp Control Thread {x} Step Start at {time_start} Time')
+                            self.timer_control_valve = True     # ref_step마다 한번씩 ON 해준다.
                             
                             while (time_start + self.ref_step) > time.time():
                                 if self.temp_control_start:
                                     # client.py에서 data = {"unit_id" : x , "cmd":"GET_STATUS", "send" : False, "raw" : False}
                                     # 로 데이터를 보내므로 온도 값이 계산되어 저장됨 따라서 *0.01을 하면 온도 값으로 사용
-                                    self.current_temp2 = self.shared_memory_u[0x11 + self.id*self.shared_memory_size] * 0.01 #온도 센서 2
-                                    
-                                    inc = self.pid(self.current_temp2)
-                                    self.time_to_on = round(inc)                            #소수점 첫번째에서 반올림
-                                    self.pid_call_time = 49                                 #타이머 호출 회수 -1
+                                    current_temp2 = self.shared_memory_u[0x11 + self.id*self.shared_memory_size] * 0.01 #온도 센서 2
+                                    current_ext_temp1 = self.shared_memory_u[0x0C + self.id*self.shared_memory_size] #Ext Temp1
+                                    current_ext_humi1 = self.shared_memory_u[0x0D + self.id*self.shared_memory_size] #Ext Humi1
+                                    current_ext_temp2 = self.shared_memory_u[0x0E + self.id*self.shared_memory_size] #Ext Temp2
+                                    current_ext_humi2 = self.shared_memory_u[0x0F + self.id*self.shared_memory_size] #Ext Humi2
                                     
                                     if self.file_write_state:                               #STATE가 Run이면 True Pause면 False
-                                        self.writer.writerow([time.time(), self.ref_temp, self.current_temp2, self.time_to_on])
-                                        print(f'id: {self.id} time to on: {self.time_to_on} C.T: {self.current_temp2:0.2F} and F.T: {self.ref_temp}')  
-                                    self.timer = Timer(0.1, self.pid_task).start()
-                                    
-                                    self.pid_event.wait()                                   #0.1초 타이머가 50번 호출되는것을 기다림
-                                    self.pid_event.clear()
+                                        self.writer.writerow([time.time(), ref_temp, current_temp2, self.time_to_on, current_ext_temp1, current_ext_humi1, 
+                                                              current_ext_temp2, current_ext_humi2])
+                                        print(f'id: {self.id} time to on: {self.time_to_on} C.T: {current_temp2:0.2F} and F.T: {ref_temp}') 
+                                        
+                                    if self.config["TEMP_CONTROL"] == 'PID':
+                                        inc = self.pid(current_temp2)
+                                        self.time_to_on = round(inc)                        #소수점 첫번째에서 반올림
+                                        self.pid_timer_call_time = 49                       #타이머 호출 회수 -1
+                                        pid_t = Timer(0.1, self.pid_task).start()
+                                    elif self.config["TEMP_CONTROL"] == 'TIMER':
+                                        if ref_temp < current_temp2:
+                                            self.time_to_on = 7                             #소수점 첫번째에서 반올림
+                                        else:
+                                            self.time_to_on = 0
+                                        self.pid_timer_call_time = 7  
+                                        timer_t = Timer(1, self.timer_task).start()
+                                        
+                                    self.pid_timer_event.wait()                            #0.1초 또는 1초 타이머가 50번 또는 7 호출되는것을 기다림
+                                    self.pid_timer_event.clear()
                                 else:
                                     self.writer_csv.close() 
                                     break
                         else:
-                            if self.pid_call_time > 0:
-                                self.pid_call_time = 0
+                            self.timer_control_valve = False
+                            if self.pid_timer_call_time > 0:
+                                self.pid_timer_call_time = 0
                             #################################################
                             #message = {"UNIT_ID" : self.id,                  
                             #            "CMD":"TEMP_RPM",
@@ -615,43 +646,43 @@ class UnitBoard:
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')      
                     elif command['CMD'] == 'CTRL':
                         if int(self.config['TANK_ID']) == int(command['TANK_ID']) and int(self.config['ADDRESS'], 16) != 0xFFF:
-                            if command['CTRL']['SENSOR_ID'] == 0x500:       #밸브는 4개 밸브 아이디는 500부터 시작
-                                x = self.config["SOLVALVE1"]                #밸브 I/O 번호
-                                if command['CTRL']['PARAM0'] == 'ON':
+                            if command['CTRL'][0]['SENSOR_ID'] == '500':    #밸브는 4개 밸브 아이디는 500부터 시작
+                                x = self.config["SOLVALVE2"]                #밸브 I/O 번호
+                                if command['CTRL'][0]['PARAM0'] == 'ON':
                                     value = ON
                                 else:
-                                    vaue = OFF
-                                message = {"UNIT_ID" : self.id,                  
+                                    value = OFF
+                                message = {"UNIT_ID" : id,                  
                                             "CMD":"TEMP_VALVE",
                                             "CHANNEL": x,
                                             "VALUE" : value}
-                                self.command_queue.put(message) 
-                            elif command['CTRL']['SENSOR_ID'] == 0x501:
-                                x = self.config["SOLVALVE2"]                    #밸브 I/O 번호
-                                if command['CTRL']['PARAM0'] == 'ON':
+                                command_queue.put(message) 
+                            elif command['CTRL'][0]['SENSOR_ID'] == '501':
+                                x = self.config["SOLVALVE1"]                    #밸브 I/O 번호
+                                if command['CTRL'][0]['PARAM0'] == 'ON':
                                     value = ON
                                 else:
-                                    vaue = OFF
-                                message = {"UNIT_ID" : self.id,                  
+                                    value = OFF
+                                message = {"UNIT_ID" : id,                  
                                             "CMD":"TEMP_VALVE",
                                             "CHANNEL": x,
                                             "VALUE" : value}
-                                self.command_queue.put(message) 
-                            elif command['CTRL']['SENSOR_ID'] == 0x502:
+                                command_queue.put(message) 
+                            elif command['CTRL'][0]['SENSOR_ID'] == '502':
                                 pass
-                            elif command['CTRL']['SENSOR_ID'] == 0x503:
+                            elif command['CTRL'][0]['SENSOR_ID'] == '503':
                                 pass
-                            elif command['CTRL']['SENSOR_ID'] == 0x600:     #모터 1개 모터 아이디는 600부터 시작
-                                rpm = int(command['CTRL']['PARAM0'])
-                                run_time = int(command['CTRL']['PARAM1'])
-                                message = {"UNIT_ID" : self.id,                  
+                            elif command['CTRL'][0]['SENSOR_ID'] == '600':     #모터 1개 모터 아이디는 600부터 시작
+                                rpm = int(command['CTRL'][0]['PARAM0'])
+                                run_time = int(command['CTRL'][0]['PARAM1'])
+                                message = {"UNIT_ID" : id,                  
                                         "CMD":"TEMP_RPM",
                                         "SPEED" : rpm, 
                                         "DIR"   : 'FW',            #FW = forward, RV = reverse
                                         "ONOFF" : 'ON', 
                                         "TIME" : run_time,
                                         "SEND" : False}    
-                                self.command_queue.put(message)
+                                command_queue.put(message)
                 self.i2c_semaphor.acquire()
                 i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0xFF)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF)

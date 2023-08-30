@@ -39,6 +39,7 @@ class UnitBoardGetStatus(threading.Thread):
             self.order = 0
             
         self.send_data = {
+            "CMD": "SENSOR",
             "ORDER": f"{self.order}",
             "DATE":f"{time.strftime('%Y-%m-%d', time.localtime(time.time()))}",
             "TIME":f"{time.strftime('%H:%M:%S')}",
@@ -46,8 +47,8 @@ class UnitBoardGetStatus(threading.Thread):
             "STATE":[],
             # "CODE":{"CODE":1000,"MSG":"OK"}
         }
-        temp_index = [16, 17, 12, 14]         #온도 값이 저장되는 shared_memory 위치
-        # temp_index = [17, 16, 12, 14]           #온도 값이 저장되는 shared_memory 위치 
+        # temp_index = [16, 17, 12, 14]         #온도 값이 저장되는 shared_memory 위치
+        temp_index = [17, 16, 12, 14]           #온도 값이 저장되는 shared_memory 위치 
         humi_index = [13, 15]                   #습도 값이 저장되는 shared_memory 위치
         co2_index = [13, 15]                    #Co2 값이 저장되는 shared_memory 위치
         self.order += 1
