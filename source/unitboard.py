@@ -64,6 +64,7 @@ class UnitBoardTempControl(threading.Thread):
         self.file_write_state = None        # CSV 파일 저장 조건 상태
         self.file_index = 0
         self.timer_control_valve = False    # 타이머로 제어 할 때, 시간 마다 한 번만 제어 하기위한 변수
+        self.motor_rpm = 0                  # 모터 현재 속도
         
     def set_cold_valve(self, value):
         self.cold_valve_status = value
@@ -95,6 +96,19 @@ class UnitBoardTempControl(threading.Thread):
                 self.time_to_on -= 1
                 if self.cold_valve_status == 0:
                     self.set_cold_valve(ON)
+                    # 온도 제어할 때, 모터가 100rpm보다 느린상태라면 구동 시킴
+                    ref_rpm = int(self.config["TEMP_CONTROL_MOTOR_RPM"])
+                    ref_motor_time = int(self.config["TEMP_CONTROL_MOTOR_TIME"])
+                    if self.motor_rpm < 100:                      
+                        message = {"UNIT_ID" : self.id,                  
+                                        "CMD":"TEMP_RPM",
+                                        "SPEED" : ref_rpm, 
+                                        "DIR"   : 'FW',            #FW = forward, RV = reverse
+                                        "ONOFF" : 'ON', 
+                                        "TIME" : ref_motor_time,
+                                        "SEND" : False}    
+                        self.command_queue.put(message) 
+                        self.logging.info(f"{message['CMD']} command is inserted Unit Board")
             else:
                 if self.cold_valve_status == 1:
                     self.set_cold_valve(OFF) 
@@ -159,30 +173,31 @@ class UnitBoardTempControl(threading.Thread):
                                     # client.py에서 data = {"unit_id" : x , "cmd":"GET_STATUS", "send" : False, "raw" : False}
                                     # 로 데이터를 보내므로 온도 값이 계산되어 저장됨 따라서 *0.01을 하면 온도 값으로 사용
                                     current_temp2 = self.shared_memory_u[0x11 + self.id*self.shared_memory_size] * 0.01 #온도 센서 2
-                                    current_ext_temp1 = self.shared_memory_u[0x0C + self.id*self.shared_memory_size] #Ext Temp1
-                                    current_ext_humi1 = self.shared_memory_u[0x0D + self.id*self.shared_memory_size] #Ext Humi1
-                                    current_ext_temp2 = self.shared_memory_u[0x0E + self.id*self.shared_memory_size] #Ext Temp2
-                                    current_ext_humi2 = self.shared_memory_u[0x0F + self.id*self.shared_memory_size] #Ext Humi2
+                                    current_ext_temp1 = self.shared_memory_u[0x0C + self.id*self.shared_memory_size] * 0.1 #Ext Temp1
+                                    current_ext_humi1 = self.shared_memory_u[0x0D + self.id*self.shared_memory_size] * 0.1 #Ext Humi1
+                                    current_ext_temp2 = self.shared_memory_u[0x0E + self.id*self.shared_memory_size] * 0.1 #Ext Temp2
+                                    current_ext_humi2 = self.shared_memory_u[0x0F + self.id*self.shared_memory_size] * 0.1 #Ext Humi2
+                                    self.motor_rpm = self.shared_memory_u[0x0A + self.id*self.shared_memory_size]          #RPM
                                     
                                     if self.file_write_state:                               #STATE가 Run이면 True Pause면 False
                                         self.writer.writerow([time.time(), ref_temp, current_temp2, self.time_to_on, current_ext_temp1, current_ext_humi1, 
                                                               current_ext_temp2, current_ext_humi2])
-                                        print(f'id: {self.id} time to on: {self.time_to_on} C.T: {current_temp2:0.2F} and F.T: {ref_temp}') 
+                                        print(f'id: {self.id} period: {time.time()} time to on: {self.time_to_on} C.T: {current_temp2:0.2F} and F.T: {ref_temp}') 
                                         
                                     if self.config["TEMP_CONTROL"] == 'PID':
                                         inc = self.pid(current_temp2)
                                         self.time_to_on = round(inc)                        #소수점 첫번째에서 반올림
                                         self.pid_timer_call_time = 49                       #타이머 호출 회수 -1
-                                        pid_t = Timer(0.1, self.pid_task).start()
+                                        pid_t = Timer(0.1, self.pid_task).start()           #0.1초 타이머
                                     elif self.config["TEMP_CONTROL"] == 'TIMER':
                                         if ref_temp < current_temp2:
-                                            self.time_to_on = 7                             #소수점 첫번째에서 반올림
+                                            self.time_to_on = int(self.config["TEMP_CONTROL_TIME"]) 
                                         else:
                                             self.time_to_on = 0
-                                        self.pid_timer_call_time = 7  
-                                        timer_t = Timer(1, self.timer_task).start()
+                                        self.pid_timer_call_time = 9  
+                                        timer_t = Timer(1, self.timer_task).start()         #1초 타이머
                                         
-                                    self.pid_timer_event.wait()                            #0.1초 또는 1초 타이머가 50번 또는 7 호출되는것을 기다림
+                                    self.pid_timer_event.wait()                             #0.1초 또는 1초 타이머가 50번 또는 7 호출되는것을 기다림
                                     self.pid_timer_event.clear()
                                 else:
                                     self.writer_csv.close() 
@@ -335,8 +350,9 @@ class UnitBoard:
                             elif command['DATA'][id]['STATUS'] == 'Initial':
                                 temp_thread.temp_control_start = False
                                 temp_thread.file_index = 0
-                                # temp_thread.ref_datas.clear()
+                                temp_thread.ref_datas.clear()
                                 shared_memory_u[0x18 + id*self.shared_memory_size] = int(command['DATA'][id]['STAGE']) << 16 | 0
+                                logging.info(f'id : {id} reference data status is  Initial')
                                 status = 4
                             elif command['DATA'][id]['STATUS'] == 'Error':
                                 temp_thread.temp_control_start = False
@@ -646,7 +662,7 @@ class UnitBoard:
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')      
                     elif command['CMD'] == 'CTRL':
                         if int(self.config['TANK_ID']) == int(command['TANK_ID']) and int(self.config['ADDRESS'], 16) != 0xFFF:
-                            if command['CTRL'][0]['SENSOR_ID'] == '500':    #밸브는 4개 밸브 아이디는 500부터 시작
+                            if command['CTRL'][0]['SENSOR_ID'] == '500':    #밸브는 4개 밸브 아이디는 500부터 시작 500-> 냉각
                                 x = self.config["SOLVALVE2"]                #밸브 I/O 번호
                                 if command['CTRL'][0]['PARAM0'] == 'ON':
                                     value = ON
@@ -657,17 +673,43 @@ class UnitBoard:
                                             "CHANNEL": x,
                                             "VALUE" : value}
                                 command_queue.put(message) 
-                            elif command['CTRL'][0]['SENSOR_ID'] == '501':
-                                x = self.config["SOLVALVE1"]                    #밸브 I/O 번호
+                            elif command['CTRL'][0]['SENSOR_ID'] == '501':  #밸브는 4개 밸브 아이디는 500부터 시작 501-> 워터
+                                x = self.config["SOLVALVE1"]                #밸브 I/O 번호
                                 if command['CTRL'][0]['PARAM0'] == 'ON':
                                     value = ON
                                 else:
                                     value = OFF
-                                message = {"UNIT_ID" : id,                  
-                                            "CMD":"TEMP_VALVE",
-                                            "CHANNEL": x,
-                                            "VALUE" : value}
-                                command_queue.put(message) 
+                                #
+                                if int(self.config['ADDRESS'], 16) != 0xFFF:
+                                    message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
+                                                data=[0xF2, 0x19, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
+                                
+                                temp = int(float(command['CTRL'][0]['PARAM1'])) * 10
+                                message.data[4] = int(x)
+                                message.data[5] = value
+                                message.data[7] = temp & 0xff               # big endian
+                                message.data[6] = (temp >> 8) & 0xff        # big endian
+                                message.data[8] = int(self.config["WATER_VALVE_ON_TIME"])
+                                    
+                                while not can_fd_receive_queue.empty():
+                                    can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+                                
+                                self.can_fd_transmitte_queue.put(message) 
+                                # time.sleep(0.40)
+                                wait = 0
+                                while can_fd_receive_queue.empty():
+                                    time.sleep(0.01)
+                                    wait += 1
+                                    if wait > 120:
+                                        break
+                                if not can_fd_receive_queue.empty():
+                                    message = can_fd_receive_queue.get()
+                                    if message.data[1] == 0x19:
+                                        logging.info(f'id : {id} Received message: {message}')
+                                    else:
+                                        logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
+                                else:
+                                    logging.warning(f'id : {id} {command["CMD"]} unit board is not response')   
                             elif command['CTRL'][0]['SENSOR_ID'] == '502':
                                 pass
                             elif command['CTRL'][0]['SENSOR_ID'] == '503':

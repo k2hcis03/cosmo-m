@@ -146,6 +146,7 @@ class CosmoMain(threading.Thread):
                         message['UNIT_ID'] = str(int(message['TANK_ID']) - 100)
                         self.command_queue[x].put(message)
                         matching = True
+                time.sleep(0.05)
                 if not matching:
                     logging.info(f"Wrong Unit board id{message['TANK_ID']}")
                     
@@ -161,8 +162,8 @@ def main():
     MAXUNITBOARD = int(common_config['MAXUNITBOARD'])
     GPIOADDR = int(common_config['GPIOADDR'], 16)
     
-    ip = common_config['HOST']
-    port = int(common_config['PORT2'])   
+    # ip = common_config['HOST']
+    # port = int(common_config['PORT2'])   
     manager = Manager()
     
     can_fd_receive = canfd.CanFDReceive(logging, main_func)

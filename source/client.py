@@ -51,26 +51,29 @@ class UnitBoardGetStatus(threading.Thread):
         temp_index = [17, 16, 12, 14]           #온도 값이 저장되는 shared_memory 위치 
         humi_index = [13, 15]                   #습도 값이 저장되는 shared_memory 위치
         co2_index = [13, 15]                    #Co2 값이 저장되는 shared_memory 위치
+        vavle_index = [1, 0]
         self.order += 1
                             
         for i in range(int(common_config['FERMEN_TANK'])):
             unit_config = self.config_file[f'unit_board{i}']
             
-            for x in range(int(unit_config['TEMP_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[i*size+temp_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['HUMI_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{200+x}',"VALUE":f"{self.shared_memory[i*size+humi_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['CO2_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{300+x}',"VALUE":f"{self.shared_memory[i*size+co2_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['LOAD_CELL'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{self.shared_memory[i*size+11]*0.01:0.2F}"})
-                # self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{100}"})
-            for x in range(int(unit_config['VALVE_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{500+x}',"VALUE":
-                    f"{(self.shared_memory[i*size+6] & (0x000000FF << x*8)) >> x*8}"})
-            for x in range(int(unit_config['MOTOR_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{600+x}',"VALUE":f"{self.shared_memory[i*size+10]}"})
-            
+            try:
+                for x in range(int(unit_config['TEMP_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[i*size+temp_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['HUMI_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{200+x}',"VALUE":f"{self.shared_memory[i*size+humi_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['CO2_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{300+x}',"VALUE":f"{self.shared_memory[i*size+co2_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['LOAD_CELL'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{self.shared_memory[i*size+11]*0.01:0.2F}"})
+                    # self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{100}"})
+                for x in range(int(unit_config['VALVE_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{500+x}',"VALUE":
+                        f"{(self.shared_memory[i*size+6] & (0x000000FF << vavle_index[x]*8)) >> vavle_index[x]*8}"})
+                for x in range(int(unit_config['MOTOR_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{100+i}',"SENSOR_ID":f'{600+x}',"VALUE":f"{self.shared_memory[i*size+10]}"})
+            except Exception as e:
+                print(e)
             stage = self.shared_memory[i*size+0x18] >> 16
             if self.shared_memory[i*size+0x18] & 0x000000FF == 0:
                 status = "None"
@@ -95,20 +98,23 @@ class UnitBoardGetStatus(threading.Thread):
         for i in range(int(common_config['BLEND_TANK'])):
             unit_config = self.config_file[f'unit_board{cnt}']
             
-            for x in range(int(unit_config['TEMP_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+temp_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['HUMI_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{200+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+humi_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['CO2_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{300+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+co2_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['LOAD_CELL'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+11]*0.01:0.2F}"})
-            for x in range(int(unit_config['VALVE_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{500+x}',"VALUE":
-                    f"{(self.shared_memory[(i+cnt)*size+6] & (0x000000FF << x*8)) >> x*8}"})
-            for x in range(int(unit_config['MOTOR_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{600+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+10]}"})
-
+            try:
+                for x in range(int(unit_config['TEMP_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+temp_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['HUMI_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{200+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+humi_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['CO2_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{300+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+co2_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['LOAD_CELL'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+11]*0.01:0.2F}"})
+                for x in range(int(unit_config['VALVE_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{500+x}',"VALUE":
+                        f"{(self.shared_memory[(i+cnt)*size+6] & (0x000000FF << x*8)) >> x*8}"})
+                for x in range(int(unit_config['MOTOR_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{200+i}',"SENSOR_ID":f'{600+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+10]}"})
+            except Exception as e:
+                print(e)
+                
             stage = self.shared_memory[(i+cnt)*size+0x18] >> 16
             if self.shared_memory[(i+cnt)*size+0x18] & 0x000000FF == 0:
                 status = "None"
@@ -131,21 +137,23 @@ class UnitBoardGetStatus(threading.Thread):
         cnt = int(common_config['FERMEN_TANK']) + int(common_config['BLEND_TANK'])  
         for i in range(int(common_config['PROD_TANK'])):
             unit_config = self.config_file[f'unit_board{cnt}']
-            
-            for x in range(int(unit_config['TEMP_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+temp_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['HUMI_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{200+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+humi_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['CO2_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{300+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+co2_index[x]]*0.01:0.2F}"})
-            for x in range(int(unit_config['LOAD_CELL'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+11]*0.01:0.2F}"})
-            for x in range(int(unit_config['VALVE_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{500+x}',"VALUE":
-                    f"{(self.shared_memory[(i+cnt)*size+6] & (0x000000FF << x*8)) >> x*8}"})
-            for x in range(int(unit_config['MOTOR_NUM'])):
-                self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{600+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+10]}"})   
-            
+            try:
+                for x in range(int(unit_config['TEMP_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{100+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+temp_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['HUMI_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{200+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+humi_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['CO2_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{300+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+co2_index[x]]*0.01:0.2F}"})
+                for x in range(int(unit_config['LOAD_CELL'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{400+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+11]*0.01:0.2F}"})
+                for x in range(int(unit_config['VALVE_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{500+x}',"VALUE":
+                        f"{(self.shared_memory[(i+cnt)*size+6] & (0x000000FF << x*8)) >> x*8}"})
+                for x in range(int(unit_config['MOTOR_NUM'])):
+                    self.send_data['VALUES'].append({"TANK_ID":f'{300+i}',"SENSOR_ID":f'{600+x}',"VALUE":f"{self.shared_memory[(i+cnt)*size+10]}"})   
+            except Exception as e:
+                print(e)
+                
             stage = self.shared_memory[(i+cnt)*size+0x18] >> 16
             if self.shared_memory[(i+cnt)*size+0x18] & 0x000000FF == 0:
                 status = "None"
@@ -163,7 +171,7 @@ class UnitBoardGetStatus(threading.Thread):
                 status = "NotDefine"  
             index_number = self.shared_memory[(i+cnt)*size+0x17]
             self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1            
-            self.send_data['STATUS'].append({"TANK_ID":300+i,"STAGE":f'{stage}',"STATUS":status, "INDEX":f'{index_number}'})
+            self.send_data['STATE'].append({"TANK_ID":f'{300+i}',"STAGE":f'{stage}',"STATUS":status, "INDEX":f'{index_number}'})
             
         cnt = int(common_config['FERMEN_TANK']) + int(common_config['BLEND_TANK']) + int(common_config['PROD_TANK'])   
         for i in range(int(common_config['CHILER_TANK'])):
@@ -200,7 +208,7 @@ class UnitBoardGetStatus(threading.Thread):
                 status = "NotDefine"      
             index_number = self.shared_memory[(i+cnt)*size+0x17]
             self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1            
-            self.send_data['STATUS'].append({"TANK_ID":f'{400+i}',"STAGE":f'{stage}',"STATUS":status,"INDEX": f'{index_number}'})
+            self.send_data['STATE'].append({"TANK_ID":f'{400+i}',"STAGE":f'{stage}',"STATUS":status,"INDEX": f'{index_number}'})
                     
     def run(self):
         common_config = self.config_file['common']
@@ -217,7 +225,10 @@ class UnitBoardGetStatus(threading.Thread):
                     self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
                     client.settimeout(None)
                     
-                    self.send_client.append(client)
+                    self.send_client.insert(0, client)        #공유 소켓
+                    # if len(self.send_client) > 0:
+                    #     self.send_client.clear()
+                    # self.send_client.append(client)
                     while True:
                         if self.event.is_set():                             # 이벤트가 발생되면 Thread 종료
                             self.event.clear()
@@ -299,7 +310,7 @@ class TcpClientThread(threading.Thread):
                     i2cbus.close()
                     self.i2c_semaphor.release()
                     self.shared_object.insert(0, client)        #공유 소켓
-                    self.send_socket = []
+                    # self.send_socket = []
                     
                     # 상태 리드 관련 쓰레드 생성 ##################################################
                     if self.status_thread:
@@ -319,12 +330,14 @@ class TcpClientThread(threading.Thread):
                                 break
                         # print(bytes(data[:128]))
                         print(bytes(data))
+                        
+                        data = json.loads(bytes(data).decode('UTF-8'))
+                        self.tcp_queue.put(data)
+                        
                         if not self.send_socket[0]._closed:
                             self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
                                                              'NOTE': 'OK'
                                                              }), 'UTF-8')) 
-                        data = json.loads(bytes(data).decode('UTF-8'))
-                        self.tcp_queue.put(data)
             except json.decoder.JSONDecodeError as e:
                 if not self.send_socket[0]._closed:
                     self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',

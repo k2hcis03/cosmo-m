@@ -1,8 +1,8 @@
 #공통
 [common]
     MAXUNITBOARD = 2
-    HOST = 192.168.0.13     
-    # HOST = 192.168.0.18
+    HOST = 192.168.0.13       
+    # HOST = 192.168.0.18      
     # Send 
     PORT1 = 7000
     # Receive
@@ -10,17 +10,17 @@
     GPIOADDR = 0x20
     SHARED_MEMORY_SIZE = 30
     BLEND_TANK = 0
-    FERMEN_TANK = 2
+    FERMEN_TANK = 1
     PROD_TANK = 0
-    CHILER_TANK = 0 
+    CHILER_TANK = 0
     JSON_FILE = /home/pi/Projects/cosmo-m/data/JSON_Ref_Stage101.txt
-#발효 1
+#발효 0
 [unit_board0]
     # 관리 프로그램에서 사용하는 ID
     TANK_ID = 100
     # CAN FD ID
-    # ADDRESS = 0x300
-    ADDRESS = 0xFFF
+    ADDRESS = 0x300
+    # ADDRESS = 0xFFF
     #MOTOR ID, 255는 사용하지 않음.
     MOTOR_ID = 1
     #ADC channel           
@@ -46,8 +46,10 @@
     #삼상 모터 슬립 속도         
     SLEEP_SPEED = 130  
     #외부 온도계 MOD BUS ID, 255는 사용하지 않음.     
+    # EXT_TEMP1_ID = 255
     EXT_TEMP1_ID = 3
     #외부 온도계 MOD BUS ID, 255는 사용하지 않음.      
+    # EXT_TEMP2_ID = 255
     EXT_TEMP2_ID = 2
 
     TEMP_NUM = 4
@@ -57,23 +59,13 @@
     MOTOR_NUM = 1
     LOAD_CELL = 1
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
-#발효 2
-[unit_board1]
+#발효 1
+[unit_board1] 
     # 관리 프로그램에서 사용하는 ID
     TANK_ID = 101
     # CAN FD ID  
-    ADDRESS = 0x301
-    # ADDRESS = 0xFFF
+    # ADDRESS = 0x301
+    ADDRESS = 0xFFF
     #MOTOR ID, 0xFF는 사용하지 않음.
     MOTOR_ID = 1 
     #ADC channel           
@@ -99,9 +91,9 @@
     #삼상 모터 슬립 속도         
     SLEEP_SPEED = 130  
     #외부 온도계 MOD BUS ID, 0xFF는 사용하지 않음.     
-    EXT_TEMP1_ID = 3  
+    EXT_TEMP1_ID = 2  
     #외부 온도계 MOD BUS ID, 0xFF는 사용하지 않음.      
-    EXT_TEMP2_ID = 2 
+    EXT_TEMP2_ID = 3 
 
     TEMP_NUM = 4
     HUMI_NUM = 2
@@ -110,17 +102,7 @@
     MOTOR_NUM = 1
     LOAD_CELL = 1
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
-#발효 3
+#발효 2
 [unit_board2]
     # 관리 프로그램에서 사용하는 ID
     TANK_ID = 102
@@ -162,17 +144,7 @@
     MOTOR_NUM = 1
     LOAD_CELL = 1
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
-#발효 4
+#발효 3
 [unit_board3]
     # 관리 프로그램에서 사용하는 ID
     TANK_ID = 103
@@ -214,16 +186,6 @@
     MOTOR_NUM = 1
     LOAD_CELL = 1
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 #숙성 1
 [unit_board4]  
     # 관리 프로그램에서 사용하는 ID
@@ -266,16 +228,6 @@
     MOTOR_NUM = 1
     LOAD_CELL = 1 
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 #숙성 2
 [unit_board5]  
     # 관리 프로그램에서 사용하는 ID
@@ -318,16 +270,6 @@
     MOTOR_NUM = 1
     LOAD_CELL = 1 
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 #제품 1
 [unit_board6] 
     # 관리 프로그램에서 사용하는 ID
@@ -370,16 +312,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0 
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 #제품 2
 [unit_board7] 
     # 관리 프로그램에서 사용하는 ID
@@ -422,16 +354,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0 
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 #제품 3
 [unit_board8]
     # 관리 프로그램에서 사용하는 ID
@@ -474,16 +396,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 #칠러 1
 [unit_board9]
     # 관리 프로그램에서 사용하는 ID
@@ -526,16 +438,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 [unit_board10]
     # 관리 프로그램에서 사용하는 ID
     TANK_ID = 900
@@ -577,16 +479,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 [unit_board11]
     ADDRESS = 0x30B 
     #MOTOR ID, 0xFF는 사용하지 않음.
@@ -625,16 +517,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 [unit_board12]
     ADDRESS = 0x30C 
     #MOTOR ID, 0xFF는 사용하지 않음.
@@ -673,16 +555,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 [unit_board13]
     ADDRESS = 0x30D 
     #MOTOR ID, 0xFF는 사용하지 않음.
@@ -721,16 +593,6 @@
     MOTOR_NUM = 0
     LOAD_CELL = 0
 
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
 [unit_board14]
     ADDRESS = 0x30E 
     #MOTOR ID, 0xFF는 사용하지 않음.
@@ -768,14 +630,3 @@
     VALVE_NUM = 0
     MOTOR_NUM = 0
     LOAD_CELL = 0
-
-    # PID or TIMER
-    TEMP_CONTROL = TIMER
-    # 하단 COLD WATER VAVLE ON TIME
-    TEMP_CONTROL_TIME = 7
-    # 상단 WATER VAVLE ON MAX TIME
-    WATER_VALVE_ON_TIME = 40
-    # 하단 COLD WATER밸브 동작 시 MOTOR ON TIME
-    TEMP_CONTROL_MOTOR_TIME = 7
-    # 하단 COLD WATER밸브 동작 시 MOTOR RPM
-    TEMP_CONTROL_MOTOR_RPM = 1200
