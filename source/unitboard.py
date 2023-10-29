@@ -120,6 +120,8 @@ class UnitBoardTempControl(threading.Thread):
             
             if self.cold_valve_status == 1:
                 self.set_cold_valve(OFF) 
+            # 한시간 마다 온도를 측정해서 냉각수를 구동시키기 때문에 위 if 문이 참이 아니면 다음 한시간을 기다리기 위해 아래
+            # self.timer_control_valve = False를 수행함
             self.timer_control_valve = False
             self.pid_timer_event.set()
               

@@ -224,11 +224,8 @@ class UnitBoardGetStatus(threading.Thread):
                     client.connect(SERVER_ADDR)
                     self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
                     client.settimeout(None)
+                    self.send_client.insert(0, client)                      # 송신 공유 소켓
                     
-                    self.send_client.insert(0, client)        #공유 소켓
-                    # if len(self.send_client) > 0:
-                    #     self.send_client.clear()
-                    # self.send_client.append(client)
                     while True:
                         if self.event.is_set():                             # 이벤트가 발생되면 Thread 종료
                             self.event.clear()
@@ -242,8 +239,10 @@ class UnitBoardGetStatus(threading.Thread):
                         ######################################################################################################  
                         # 2023-06-19-@K2H 
                         # 서버에 데이터를 전송하기 전에 필요 데이터 정렬
+                        
                         if not client._closed:
                             client.sendall(bytes(json.dumps(self.send_data), 'UTF-8')) 
+                        
                         ######################################################################################################
                         time.sleep(1)    
             except socket.timeout:
@@ -260,7 +259,7 @@ class UnitBoardGetStatus(threading.Thread):
             except Exception as e:
                 time.sleep(0.5)
                 print(e)
-        client.close()          
+                client.close()          
 class TcpClientThread(threading.Thread):
     def __init__(self, tcp_queue, logging, GPIOADDR, shared_object, 
                  i2c_semaphor, MAXUNITBOARD, shm_name, unit_np_shm):
@@ -309,7 +308,7 @@ class TcpClientThread(threading.Thread):
                     i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF)
                     i2cbus.close()
                     self.i2c_semaphor.release()
-                    self.shared_object.insert(0, client)        #공유 소켓
+                    self.shared_object.insert(0, client)        #수신 공유 소켓
                     # self.send_socket = []
                     
                     # 상태 리드 관련 쓰레드 생성 ##################################################
@@ -331,20 +330,21 @@ class TcpClientThread(threading.Thread):
                         # print(bytes(data[:128]))
                         print(bytes(data))
                         
-                        data = json.loads(bytes(data).decode('UTF-8'))
-                        self.tcp_queue.put(data)
-                        
-                        if not self.send_socket[0]._closed:
-                            self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
-                                                             'NOTE': 'OK'
-                                                             }), 'UTF-8')) 
-            except json.decoder.JSONDecodeError as e:
-                if not self.send_socket[0]._closed:
-                    self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
-                                                        'NOTE': 'Resend'
-                                                        }), 'UTF-8')) 
-                print(e)
-                print(traceback.format_exc())
+                        try:
+                            data = json.loads(bytes(data).decode('UTF-8'))
+                            self.tcp_queue.put(data)
+                            
+                            if not self.send_socket[0]._closed:
+                                self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
+                                                                'NOTE': 'OK'
+                                                                }), 'UTF-8')) 
+                        except json.decoder.JSONDecodeError as e:
+                            if not self.send_socket[0]._closed:
+                                self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
+                                                                    'NOTE': 'Resend'
+                                                                    }), 'UTF-8')) 
+                            print(e)
+                            print(traceback.format_exc())
             except socket.timeout:
                 print("Connection attempt timed out.")
                 i2cbus = smbus.SMBus(1) 
