@@ -158,6 +158,7 @@ class UnitBoardTempControl(threading.Thread):
                             # 2023-08-11 테스트용으로 모터 RPM을 1000으로 수정
                             # ref_rpm = 1000
                             #################################################
+                            # 레퍼런스 데이터에서 모터를 구동시키면 아래 동작함.
                             message = {"UNIT_ID" : self.id,                  
                                         "CMD":"TEMP_RPM",
                                         "SPEED" : ref_rpm, 
