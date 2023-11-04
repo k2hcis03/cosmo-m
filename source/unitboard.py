@@ -108,7 +108,7 @@ class UnitBoardTempControl(threading.Thread):
                                         "TIME" : ref_motor_time,
                                         "SEND" : False}    
                         self.command_queue.put(message) 
-                        self.logging.info(f"{message['CMD']} command is inserted Unit Board")
+                        # self.logging.info(f"{message['CMD']} command is inserted Unit Board")
             else:
                 if self.cold_valve_status == 1:
                     self.set_cold_valve(OFF) 
@@ -167,7 +167,7 @@ class UnitBoardTempControl(threading.Thread):
                                         "TIME" : ref_motor_time,
                                         "SEND" : False}    
                             self.command_queue.put(message) 
-                            self.logging.info(f"{message['CMD']} command is inserted Unit Board")
+                            # self.logging.info(f"{message['CMD']} command is inserted Unit Board")
                             # self.logging.info(f'id : {self.id} UnitBoard Temp Control Thread {x} Step Start at {time_start} Time')
                             self.timer_control_valve = True     # ref_step마다 한번씩 ON 해준다.
                             
@@ -181,12 +181,7 @@ class UnitBoardTempControl(threading.Thread):
                                     current_ext_temp2 = self.shared_memory_u[0x0E + self.id*self.shared_memory_size] * 0.1 #Ext Temp2
                                     current_ext_humi2 = self.shared_memory_u[0x0F + self.id*self.shared_memory_size] * 0.1 #Ext Humi2
                                     self.motor_rpm = self.shared_memory_u[0x0A + self.id*self.shared_memory_size]          #RPM
-                                    
-                                    if self.file_write_state:                               #STATE가 Run이면 True Pause면 False
-                                        self.writer.writerow([time.time(), ref_temp, current_temp2, self.time_to_on, current_ext_temp1, current_ext_humi1, 
-                                                              current_ext_temp2, current_ext_humi2])
-                                        print(f'id: {self.id} period: {time.time()} time to on: {self.time_to_on} C.T: {current_temp2:0.2F} and F.T: {ref_temp}') 
-                                        
+   
                                     if self.config["TEMP_CONTROL"] == 'PID':
                                         inc = self.pid(current_temp2)
                                         self.time_to_on = round(inc)                        #소수점 첫번째에서 반올림
@@ -199,7 +194,12 @@ class UnitBoardTempControl(threading.Thread):
                                             self.time_to_on = 0
                                         self.pid_timer_call_time = 9  
                                         timer_t = Timer(1, self.timer_task).start()         #1초 타이머
-                                        
+                                    
+                                    if self.file_write_state:                               #STATE가 Run이면 True Pause면 False
+                                        self.writer.writerow([time.time(), ref_temp, current_temp2, self.time_to_on, current_ext_temp1, current_ext_humi1, 
+                                                              current_ext_temp2, current_ext_humi2])
+                                        print(f'id: {self.id} period: {time.time()} time to on: {self.time_to_on} C.T: {current_temp2:0.2F} and F.T: {ref_temp}')
+                                            
                                     self.pid_timer_event.wait()                             #0.1초 또는 1초 타이머가 50번 또는 7 호출되는것을 기다림
                                     self.pid_timer_event.clear()
                                 else:
@@ -282,12 +282,12 @@ class UnitBoard:
         time.sleep(0.10)
 
         if not can_fd_receive_queue.empty():
-            logging.info(f'id : {id} unit board is initialized')    
+            logging.info(f'CAN id : {id} unit board is initialized')    
             message = can_fd_receive_queue.get()
             fw_version = (message.data[4] << 8) | (message.data[5])
-            logging.info(f'id : {id} firmware version is : {fw_version * 0.01 : 0.2F}')
+            logging.info(f'CAN id : {id} firmware version is : {fw_version * 0.01 : 0.2F}')
         else:
-            logging.warning(f'id : {id} unit board is not response')    
+            logging.warning(f'CAN id : {id} unit board is not response')    
         ######################################################################################################################################################                        
         while True:
             try: 
@@ -398,16 +398,16 @@ class UnitBoard:
                             if not can_fd_receive_queue.empty():
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x11:
-                                    logging.info(f'id : {id} Received message: {message}')
+                                    logging.info(f'CAN id : {id} Received message: {message}')
                                     if self.socket[0]:
                                         if message.data[4] == 1:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
+                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'CAN {id}', "status":f"success!"}), 'UTF-8'))
                                         else:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
+                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'CAN {id}', "status":"fail!"}), 'UTF-8'))
                                 else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
+                                    logging.warning(f'CAN id : {id} {command["CMD"]} unit board is wrong response')  
                             else:
-                                logging.warning(f'id : {id} {command["CMD"]} unit board is not response')   
+                                logging.warning(f'CAN id : {id} {command["CMD"]} unit board is not response')   
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')            
                     elif command['CMD'] == 'GET_ADC':
                         if int(self.config['ADDRESS'], 16) != 0xFFF:
@@ -428,7 +428,7 @@ class UnitBoard:
                             if not can_fd_receive_queue.empty():
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x12:
-                                    logging.info(f'id : {id} Received message: {message}')
+                                    logging.info(f'CAN id : {id} Received message: {message}')
                                     unit_semaphor.acquire()
                                     shared_memory_u[0x00 + id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[4] << 8) | (np.int32)(message.data[5]))
                                     shared_memory_u[0x01 + id*self.shared_memory_size]  = (np.int32)((np.int32)(message.data[6] << 8) | (np.int32)(message.data[7]))
@@ -446,9 +446,9 @@ class UnitBoard:
                                                     "ADC4": f'{shared_memory_u[0x04 + id*self.shared_memory_size]}',
                                                     "ADC5": f'{shared_memory_u[0x05 + id*self.shared_memory_size]}'}), 'UTF-8'))
                                 else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response') 
+                                    logging.warning(f'CAN id : {id} {command["CMD"]} unit board is wrong response') 
                             else:
-                                logging.warning(f'id : {id} {command["CMD"]} unit board is not response') 
+                                logging.warning(f'CAN id : {id} {command["CMD"]} unit board is not response') 
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'SET_GPIO':
                         if int(self.config['ADDRESS'], 16) != 0xFFF:
@@ -473,13 +473,13 @@ class UnitBoard:
                             if not can_fd_receive_queue.empty():
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x13:
-                                    logging.info(f'id : {id} Received message: {message}')
+                                    logging.info(f'CAN id : {id} Received message: {message}')
                                     if self.socket[0]:
                                         self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
                                 else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response') 
+                                    logging.warning(f'CAN id : {id} {command["CMD"]} unit board is wrong response') 
                             else:
-                                logging.warning(f'id : {id} {command["CMD"]} unit board is not response') 
+                                logging.warning(f'CAN id : {id} {command["CMD"]} unit board is not response') 
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'GET_STATUS':
                         if int(self.config['ADDRESS'], 16) != 0xFFF:
@@ -502,7 +502,7 @@ class UnitBoard:
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x14:
                                     if command['SEND']:                      # 로고에 너무 많이 쌓이는 데이터 방지, 
-                                        logging.info(f'id : {id} Received message: {message}')
+                                        logging.info(f'CAN id : {id} Received message: {message}')
                                     inclination1 = 77.5 / (float(self.config['TEMP1_77_5']) - float(self.config['TEMP1_0']))
                                     y_offset1 = inclination1 * float(self.config['TEMP1_0'])
                                     
@@ -563,9 +563,9 @@ class UnitBoard:
                                             "EXTHUMI2": f'{shared_memory_u[0x0F + id*self.shared_memory_size] * 0.01 : 0.2F}%',
                                             }), 'UTF-8'))
                                 else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')
+                                    logging.warning(f'CAN id : {id} {command["CMD"]} unit board is wrong response')
                             else:
-                                logging.warning(f'id : {id} {command["CMD"]} unit board is not response') 
+                                logging.warning(f'CAN id : {id} {command["CMD"]} unit board is not response') 
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'START_TEMP':
                         if int(self.config['ADDRESS'], 16) != 0xFFF:
@@ -617,16 +617,16 @@ class UnitBoard:
                             if not can_fd_receive_queue.empty():
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x17:
-                                    logging.info(f'id : {id} Received message: {message}')
+                                    logging.info(f'CAN id : {id} Received message: {message}')
                                     if command['SEND'] and self.socket[0]:
                                         if message.data[4] == 1:
                                             self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
                                         else:
                                             self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
                                 else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
+                                    logging.warning(f'CAN id : {id} {command["CMD"]} unit board is wrong response')  
                             else:
-                                logging.warning(f'id : {id} {command["CMD"]} unit board is not response')   
+                                logging.warning(f'CAN id : {id} {command["CMD"]} unit board is not response')   
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'TEMP_VALVE':
                         if int(self.config['ADDRESS'], 16) != 0xFFF:
@@ -650,7 +650,7 @@ class UnitBoard:
                             if not can_fd_receive_queue.empty():
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x18:
-                                    logging.info(f'id : {id} Received message: {message}')
+                                    logging.info(f'CAN id : {id} Received message: {message}')
                                     # temp_thread.set_cold_valve(message.data[5])   # 지속적인 재전송을 원하면 주석 해제. 
                                     
                                     if self.socket[0]:
@@ -659,9 +659,9 @@ class UnitBoard:
                                         else:
                                             self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
                                 else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
+                                    logging.warning(f'CAN id : {id} {command["CMD"]} unit board is wrong response')  
                             else:
-                                logging.warning(f'id : {id} {command["CMD"]} unit board is not response')  
+                                logging.warning(f'CAN id : {id} {command["CMD"]} unit board is not response')  
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')      
                     elif command['CMD'] == 'CTRL':
                         if int(self.config['TANK_ID']) == int(command['TANK_ID']) and int(self.config['ADDRESS'], 16) != 0xFFF:
@@ -708,11 +708,11 @@ class UnitBoard:
                                 if not can_fd_receive_queue.empty():
                                     message = can_fd_receive_queue.get()
                                     if message.data[1] == 0x19:
-                                        logging.info(f'id : {id} Received message: {message}')
+                                        logging.info(f'CAN id : {id} Received message: {message}')
                                     else:
-                                        logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
+                                        logging.warning(f'CAN id : {id} {command["CMD"]} unit board is wrong response')  
                                 else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is not response')   
+                                    logging.warning(f'CAN id : {id} {command["CMD"]} unit board is not response')   
                             elif command['CTRL'][0]['SENSOR_ID'] == '502':
                                 pass
                             elif command['CTRL'][0]['SENSOR_ID'] == '503':

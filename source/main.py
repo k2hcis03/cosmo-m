@@ -83,11 +83,11 @@ class CosmoMain(threading.Thread):
             message = self.tcp_queue.get()  
             if  message['CMD'] != 'GET_STATUS':         # GET_STATUS는 계속 호출 되므로 log에 출력 하지 않음.
                 if message['CMD'] == 'REF':
-                    logging.info(f"{message['CMD']} command is inserted to {message['TANK_ID']} Unit Board")
+                    logging.info(f"TCP {message['CMD']} command is inserted to {message['TANK_ID']} Unit Board")
                 elif message['CMD'] == 'STATE':
-                    logging.info(f"{message['CMD']} command is inserted Unit Board")
+                    logging.info(f"TCP {message['CMD']} command is inserted Unit Board")
                 else:
-                    logging.info(f"{message['CMD']} command is inserted Unit Board")
+                    logging.info(f"TCP {message['CMD']} command is inserted Unit Board")
             # UNIT_ID는 관리 프로그램과 협의해서 변경해야 함.
             if message['CMD'] == 'STATE':
                 for x in range(MAXUNITBOARD):

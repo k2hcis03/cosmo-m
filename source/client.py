@@ -18,6 +18,7 @@ class UnitBoardGetStatus(threading.Thread):
         self.daemon = True
         self.logging = logging
         self.event = event
+        self.update_event = threading.Event()   
         self.tcp_queue = tcp_queue
         self.max_unit_board = max_unit_board
         self.shared_memory = shared_memory
@@ -30,7 +31,7 @@ class UnitBoardGetStatus(threading.Thread):
         self.send_client = send_socket
         self.make_json_data()
         logging.info(f'status read thread  is running') 
-        
+                
     def make_json_data(self):
         common_config = self.config_file['common']
         size = int(common_config['SHARED_MEMORY_SIZE'])
@@ -209,7 +210,17 @@ class UnitBoardGetStatus(threading.Thread):
             index_number = self.shared_memory[(i+cnt)*size+0x17]
             self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1            
             self.send_data['STATE'].append({"TANK_ID":f'{400+i}',"STAGE":f'{stage}',"STATUS":status,"INDEX": f'{index_number}'})
-                    
+   
+    def timer_upadate_task(self):    
+        for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
+            data = {"UNIT_ID" : x, "CMD":"GET_STATUS", "SEND" : False}
+            self.tcp_queue.put(data)
+            time.sleep(0.1)
+        self.make_json_data()   
+        time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
+        self.update_event.set()
+        Timer(1, self.timer_upadate_task).start()
+                           
     def run(self):
         common_config = self.config_file['common']
         
@@ -217,6 +228,9 @@ class UnitBoardGetStatus(threading.Thread):
         port = int(common_config['PORT1']) 
         SERVER_ADDR = (ip, port)
         timeout_seconds = 1
+        
+        timer_t = Timer(1, self.timer_upadate_task).start()         #1초 타이머
+        socket_timeout = 0
         while True:
             try: 
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
@@ -225,26 +239,21 @@ class UnitBoardGetStatus(threading.Thread):
                     self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
                     client.settimeout(None)
                     self.send_client.insert(0, client)                      # 송신 공유 소켓
+                    socket_timeout = 0
                     
                     while True:
                         if self.event.is_set():                             # 이벤트가 발생되면 Thread 종료
                             self.event.clear()
                             return
-                        for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
-                            data = {"UNIT_ID" : x, "CMD":"GET_STATUS", "SEND" : False}
-                            self.tcp_queue.put(data)
-                            time.sleep(0.1)
-                        self.make_json_data()   
-                        time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
                         ######################################################################################################  
                         # 2023-06-19-@K2H 
                         # 서버에 데이터를 전송하기 전에 필요 데이터 정렬
-                        
+                        self.update_event.wait()
+                        self.update_event.clear()
                         if not client._closed:
                             client.sendall(bytes(json.dumps(self.send_data), 'UTF-8')) 
-                        
                         ######################################################################################################
-                        time.sleep(1)    
+                        # time.sleep(1)    
             except socket.timeout:
                 if self.event.is_set():                             # 이벤트가 발생되면 Thread 종료
                     self.event.clear()
@@ -255,6 +264,11 @@ class UnitBoardGetStatus(threading.Thread):
                     time.sleep(0.1)
                 self.make_json_data()   
                 time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
+                socket_timeout += 1
+                
+                if socket_timeout >= 5:
+                    socket_timeout = 0
+                    client.close()
                 print("Connection attempt timed out.")
             except Exception as e:
                 time.sleep(0.5)
@@ -291,12 +305,14 @@ class TcpClientThread(threading.Thread):
         port = int(common_config['PORT2'])               
         SERVER_ADDR = (ip, port)
         timeout_seconds = 5
+        socket_timeout = 0
         while True:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                     client.settimeout(timeout_seconds)
                     client.connect(SERVER_ADDR)
                     self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
+                    socket_timeout = 0
                     
                     if self.status_thread and self.status_thread.is_alive():
                         self.event.set()                        #기존 쓰레드 소멸
@@ -354,6 +370,11 @@ class TcpClientThread(threading.Thread):
                 i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0x00)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0x00)
                 i2cbus.close()
+                socket_timeout += 1
+                
+                if socket_timeout >= 5:
+                    socket_timeout = 0
+                    client.close()
             except Exception as e:
                 client.close()
                 time.sleep(0.5)

@@ -32,8 +32,21 @@ class CanFDTransmitte(threading.Thread):
         self.logging.info('CanFDTransmitte initialized')
         self.daemon = True
         self.queue = None
-        
+        self.parsing = {
+            0x11 : 'MOTOR_SPEED',
+            0x12 : 'GET_ADC',
+            0x13 : 'SET_GPIO',
+            0x14 : 'GET_STATUS',
+            0x15 : 'SET_TEMP',
+            0x16 : 'SET_CONFIG',
+            0x17 : 'TEMP_RPM',
+            0x18 : 'TEMP_VALVE',
+            0x19 : 'WEIGHT_VALVE',
+            0x21 : 'SET_LED'
+        }
     def run(self): 
         while True:
             message = self.queue.get()
+            if message.data[1] != 0x14:
+                self.logging.info(f"CAN {self.parsing[message.data[1]]} command is inserted Unit Board")
             self.can0.send(message)
