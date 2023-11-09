@@ -22,7 +22,7 @@ import unitboard
 from unitboard import UnitBoard as unit_board
 from client import TcpClientThread as tcp_client
 
-shared_object = Manager().list()            # 프로세스간 공유 소켓 정보
+shared_object = list()                  # client 쓰레드와 공유 소켓 정보
 shared_object.insert(0, None)
 
 GPIOADDR = 0x20
@@ -173,11 +173,12 @@ def main():
     can_fd_transmitte = canfd.CanFDTransmitte(logging, main_func)
     can_fd_transmitte.queue = manager.Queue(1024)
     can_fd_transmitte.start()
+    socket_send_queue = manager.Queue(4096)
     
     for i in range(MAXUNITBOARD):
         can_fd_receive.receive_queue.append(manager.Queue(1024))
         main_func.command_queue.append(manager.Queue(1024))
-    
+        
     # 숫자를 저장할 numpy 배열(1차원) 생성
     shared_mem_size = int(common_config['SHARED_MEMORY_SIZE'])
     arr = np.array([i for i in range(MAXUNITBOARD * shared_mem_size)], dtype=np.int32) 
@@ -189,14 +190,14 @@ def main():
     main_func.start()
     
     main_func.client = tcp_client(tcp_queue, logging, GPIOADDR, shared_object, i2c_semaphor, MAXUNITBOARD, 
-                                  shm.name, main_func.unit_np_shm)
-    main_func.client.start()                            #tcp client 시작
+                                  shm.name, main_func.unit_np_shm, socket_send_queue)
+    main_func.client.start()                                                #tcp client 시작
     unitboard.g_file_path = common_config['JSON_FILE']
     try:
         while True:
             if shared_object[0] and not shared_object[0]._closed:           #처음 서버에 연결 될 때까지 무한루프 실행
                 with ProcessPoolExecutor(max_workers=20) as executor:
-                    unit_func = unit_board(can_fd_transmitte.queue, shared_object, GPIOADDR, i2c_semaphor)
+                    unit_func = unit_board(can_fd_transmitte.queue, socket_send_queue, GPIOADDR, i2c_semaphor)
                     
                     furtures = {executor.submit(unit_func.unit_process, i, shm.name, main_func.unit_np_shm, 
                                                 main_func.unit_semaphor, can_fd_receive.receive_queue[i],

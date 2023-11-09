@@ -47,6 +47,6 @@ class CanFDTransmitte(threading.Thread):
     def run(self): 
         while True:
             message = self.queue.get()
-            if message.data[1] != 0x14:
+            if message.data[1] != 0x14: # STATUS 명령어는 표시 하지 않음.
                 self.logging.info(f"CAN {self.parsing[message.data[1]]} command is inserted Unit Board")
             self.can0.send(message)

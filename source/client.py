@@ -11,9 +11,11 @@ from threading import Timer
 from multiprocessing import shared_memory
 import traceback
 import configparser
+import datetime
+import os
 
 class UnitBoardGetStatus(threading.Thread):
-    def __init__(self, logging, event, tcp_queue, send_socket, max_unit_board, shared_memory):
+    def __init__(self, logging, event, tcp_queue, max_unit_board, shared_memory, socket_send_queue):
         threading.Thread.__init__(self)
         self.daemon = True
         self.logging = logging
@@ -28,8 +30,9 @@ class UnitBoardGetStatus(threading.Thread):
     
         self.send_data = []
         self.order = 0
-        self.send_client = send_socket
         self.make_json_data()
+        self.socket_send_queue = socket_send_queue
+        self.client = None
         logging.info(f'status read thread  is running') 
                 
     def make_json_data(self):
@@ -218,7 +221,10 @@ class UnitBoardGetStatus(threading.Thread):
             time.sleep(0.1)
         self.make_json_data()   
         time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
-        self.update_event.set()
+        
+        if not self.client._closed:
+            self.socket_send_queue.put(bytes(json.dumps(self.send_data), 'UTF-8'))
+        # self.update_event.set()
         Timer(1, self.timer_upadate_task).start()
                            
     def run(self):
@@ -227,10 +233,9 @@ class UnitBoardGetStatus(threading.Thread):
         ip = common_config['HOST']
         port = int(common_config['PORT1']) 
         SERVER_ADDR = (ip, port)
-        timeout_seconds = 1
-        
+        timeout_seconds = 5
         timer_t = Timer(1, self.timer_upadate_task).start()         #1초 타이머
-        socket_timeout = 0
+        socket_timeout_cnt = 0
         while True:
             try: 
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
@@ -238,9 +243,8 @@ class UnitBoardGetStatus(threading.Thread):
                     client.connect(SERVER_ADDR)
                     self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
                     client.settimeout(None)
-                    self.send_client.insert(0, client)                      # 송신 공유 소켓
-                    socket_timeout = 0
-                    
+                    socket_timeout_cnt = 0
+                    self.client = client
                     while True:
                         if self.event.is_set():                             # 이벤트가 발생되면 Thread 종료
                             self.event.clear()
@@ -248,10 +252,14 @@ class UnitBoardGetStatus(threading.Thread):
                         ######################################################################################################  
                         # 2023-06-19-@K2H 
                         # 서버에 데이터를 전송하기 전에 필요 데이터 정렬
-                        self.update_event.wait()
-                        self.update_event.clear()
+                        # self.update_event.wait()
+                        # self.update_event.clear()
+                        send_data = self.socket_send_queue.get()
                         if not client._closed:
-                            client.sendall(bytes(json.dumps(self.send_data), 'UTF-8')) 
+                            # client.sendall(bytes(json.dumps(self.send_data), 'UTF-8')) 
+                            client.sendall(send_data) 
+                        else:
+                            pass        
                         ######################################################################################################
                         # time.sleep(1)    
             except socket.timeout:
@@ -264,19 +272,14 @@ class UnitBoardGetStatus(threading.Thread):
                     time.sleep(0.1)
                 self.make_json_data()   
                 time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
-                socket_timeout += 1
-                
-                if socket_timeout >= 5:
-                    socket_timeout = 0
-                    client.close()
                 print("Connection attempt timed out.")
             except Exception as e:
-                time.sleep(0.5)
                 print(e)
-                client.close()          
+            finally:
+                client.close()        
 class TcpClientThread(threading.Thread):
     def __init__(self, tcp_queue, logging, GPIOADDR, shared_object, 
-                 i2c_semaphor, MAXUNITBOARD, shm_name, unit_np_shm):
+                 i2c_semaphor, MAXUNITBOARD, shm_name, unit_np_shm, socket_send_queue):
         threading.Thread.__init__(self)
         self.daemon = True
         self.logging = logging
@@ -293,7 +296,8 @@ class TcpClientThread(threading.Thread):
         self.new_shm = shared_memory.SharedMemory(name=self.shm_name)
         self.shared_memory = np.ndarray(unit_np_shm.shape, dtype=unit_np_shm.dtype, buffer=self.new_shm.buf)
     
-        self.send_socket = []
+        # self.send_socket = []
+        self.socket_send_queue = socket_send_queue
     def run(self):
         self.logging.info('클라이언트 동작')
         
@@ -301,18 +305,22 @@ class TcpClientThread(threading.Thread):
         config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')     ## 파일 읽기
         common_config = config_file['common']
         
+        # json_file = f"/home/pi/Projects/cosmo-m/ref_data/{datetime.datetime.now().strftime('%y%m%d_%H%M%S')}"
+        # os.mkdir(json_file)
+        # json_index = f"ref_data_{datetime.datetime.now().strftime('%H%M%S')}.json"
+        
         ip = common_config['HOST']
         port = int(common_config['PORT2'])               
         SERVER_ADDR = (ip, port)
         timeout_seconds = 5
-        socket_timeout = 0
+        socket_timeout_cnt = 0
         while True:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                     client.settimeout(timeout_seconds)
                     client.connect(SERVER_ADDR)
                     self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
-                    socket_timeout = 0
+                    socket_timeout_cnt = 0
                     
                     if self.status_thread and self.status_thread.is_alive():
                         self.event.set()                        #기존 쓰레드 소멸
@@ -330,8 +338,8 @@ class TcpClientThread(threading.Thread):
                     # 상태 리드 관련 쓰레드 생성 ##################################################
                     if self.status_thread:
                         del self.status_thread
-                    self.status_thread = UnitBoardGetStatus(self.logging, self.event, self.tcp_queue, self.send_socket, 
-                                                            self.max_unit_board, self.shared_memory)
+                    self.status_thread = UnitBoardGetStatus(self.logging, self.event, self.tcp_queue, 
+                                                            self.max_unit_board, self.shared_memory, self.socket_send_queue)
                     self.status_thread.start()                  #테스트 용으로 주석 처리하고 동작 시, 주석 해제. json_server_send.py 동작시 주석처리(7002포트 에러 발생)
                     cnt = 0
                     client.settimeout(None)
@@ -343,22 +351,22 @@ class TcpClientThread(threading.Thread):
                             if len(part) < 64:
                                 # either 0 or end of data
                                 break
-                        # print(bytes(data[:128]))
+                        # print(bytes(data[:64]))
                         print(bytes(data))
-                        
                         try:
                             data = json.loads(bytes(data).decode('UTF-8'))
                             self.tcp_queue.put(data)
                             
-                            if not self.send_socket[0]._closed:
-                                self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
-                                                                'NOTE': 'OK'
-                                                                }), 'UTF-8')) 
+                            self.socket_send_queue.put(bytes(json.dumps({'CMD':'ACK',
+                                                            'NOTE': 'OK'
+                                                            }), 'UTF-8')) 
                         except json.decoder.JSONDecodeError as e:
-                            if not self.send_socket[0]._closed:
-                                self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
-                                                                    'NOTE': 'Resend'
-                                                                    }), 'UTF-8')) 
+                            self.socket_send_queue.put(bytes(json.dumps({'CMD':'ACK',
+                                                                'NOTE': 'Resend'
+                                                                }), 'UTF-8')) 
+                            print(e)
+                            print(traceback.format_exc())
+                        except Exception as e:
                             print(e)
                             print(traceback.format_exc())
             except socket.timeout:
@@ -370,14 +378,9 @@ class TcpClientThread(threading.Thread):
                 i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0x00)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0x00)
                 i2cbus.close()
-                socket_timeout += 1
-                
-                if socket_timeout >= 5:
-                    socket_timeout = 0
-                    client.close()
             except Exception as e:
-                client.close()
                 time.sleep(0.5)
                 print(e)
-                
                 print(traceback.format_exc())
+            finally:
+                client.close()
