@@ -16,6 +16,7 @@ from pid_controller import PID_COSMO_M
 import csv
 import configparser
 import traceback
+import datetime
 
 setpoint = 15.0  # Target temperature
 Kp = 1.0  # Proportional gain
@@ -65,7 +66,7 @@ class UnitBoardTempControl(threading.Thread):
         self.file_index = 0
         self.timer_control_valve = False    # 타이머로 제어 할 때, 시간 마다 한 번만 제어 하기위한 변수
         self.motor_rpm = 0                  # 모터 현재 속도
-        
+        self.dir_name = None                # data 기록 디렉토리 생성 initial 상태에서 업데이트 됨
     def set_cold_valve(self, value):
         self.cold_valve_status = value
         x = self.config["SOLVALVE2"]        #냉각수 밸브 I/O 번호
@@ -139,7 +140,9 @@ class UnitBoardTempControl(threading.Thread):
                     ## 온도 테스트를 위한 데이저 저장. 
                     if self.file_write:
                         try:
-                            self.writer_csv = open(f"/home/pi/Projects/cosmo-m/data/pid_process{self.id}_{self.file_index}.csv", 'w', encoding='utf-8', newline='')
+                            if not os.path.isdir(self.dir_name):
+                                os.mkdir(self.dir_name)
+                            self.writer_csv = open(f'{self.dir_name}/pid_process{self.id}_{self.file_index}.csv', 'w', encoding='utf-8', newline='')
                             self.writer = csv.writer(self.writer_csv, delimiter=',')
                             self.writer.writerow(['time'] + ['ref.temp'] + ['real temp'] + ['valve on time']  + ['ext1 temp'] + ['ext1 humi'] + ['ext2 temp'] + ['ext2 humi'])   
                             self.file_write = False
@@ -354,6 +357,7 @@ class UnitBoard:
                                 temp_thread.temp_control_start = False
                                 temp_thread.file_index = 0
                                 temp_thread.ref_datas.clear()
+                                temp_thread.dir_name = f"/home/pi/Projects/cosmo-m/data/{datetime.datetime.now().strftime('%y%m%d_%H%M%S')}"
                                 shared_memory_u[0x18 + id*self.shared_memory_size] = int(command['DATA'][id]['STAGE']) << 16 | 0
                                 logging.info(f'id : {id} reference data status is  Initial')
                                 status = 4

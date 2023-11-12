@@ -1,8 +1,9 @@
 import logging
 import os
 from logging.handlers import RotatingFileHandler
+import datetime
 
-log_dir = '/home/pi/Projects/cosmo-m/log'
+log_dir = f'/home/pi/Projects/cosmo-m/log/{datetime.datetime.now().strftime("%y%m%d_%H%M%S")}'
 log_fname = 'debug.log'
 
 if not os.path.exists(log_dir):

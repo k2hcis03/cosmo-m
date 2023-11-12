@@ -320,9 +320,9 @@ class TcpClientThread(threading.Thread):
                     while True:
                         data = bytearray()
                         while True:
-                            part = client.recv(64)
+                            part = client.recv(128)
                             data += part
-                            if len(part) < 64:
+                            if len(part) < 128:
                                 # either 0 or end of data
                                 break
                         # print(bytes(data[:128]))
