@@ -173,6 +173,7 @@ def main():
     can_fd_transmitte = canfd.CanFDTransmitte(logging, main_func)
     can_fd_transmitte.queue = manager.Queue(1024)
     can_fd_transmitte.start()
+    socket_send_queue = manager.Queue(524288)
     
     for i in range(MAXUNITBOARD):
         can_fd_receive.receive_queue.append(manager.Queue(1024))
@@ -188,25 +189,31 @@ def main():
     main_func.unit_semaphor = manager.Semaphore(1) 
     main_func.start()
     
-    main_func.client = tcp_client(tcp_queue, logging, GPIOADDR, shared_object, i2c_semaphor, MAXUNITBOARD, 
-                                  shm.name, main_func.unit_np_shm)
+    socket_event = threading.Event()
+    main_func.client = tcp_client(tcp_queue, logging, GPIOADDR, socket_event, i2c_semaphor, MAXUNITBOARD, 
+                                  shm.name, main_func.unit_np_shm, socket_send_queue)
     main_func.client.start()                            #tcp client 시작
     unitboard.g_file_path = common_config['JSON_FILE']
+    print("Server is not Connected")
     try:
         while True:
-            if shared_object[0] and not shared_object[0]._closed:           #처음 서버에 연결 될 때까지 무한루프 실행
-                with ProcessPoolExecutor(max_workers=20) as executor:
-                    unit_func = unit_board(can_fd_transmitte.queue, shared_object, GPIOADDR, i2c_semaphor)
-                    
-                    furtures = {executor.submit(unit_func.unit_process, i, shm.name, main_func.unit_np_shm, 
-                                                main_func.unit_semaphor, can_fd_receive.receive_queue[i],
-                                                main_func.command_queue[i], logging) : i for i in range(MAXUNITBOARD)}
-                    for furture in as_completed(furtures):  
-                        print("All Process is done")
-                    sys.exit(1)
-            else:
-                time.sleep(1)
-                print("Server is not Connected")
+            # if shared_object[0] and not shared_object[0]._closed:           # 처음 서버에 연결 될 때까지 무한루프 실행
+            print("Server is not Connected")
+            socket_event.wait()
+            socket_event.clear()
+            print("Server is Connected")
+            with ProcessPoolExecutor(max_workers=20) as executor:
+                unit_func = unit_board(can_fd_transmitte.queue, socket_send_queue, GPIOADDR, i2c_semaphor)
+                
+                furtures = {executor.submit(unit_func.unit_process, i, shm.name, main_func.unit_np_shm, 
+                                            main_func.unit_semaphor, can_fd_receive.receive_queue[i],
+                                            main_func.command_queue[i], logging) : i for i in range(MAXUNITBOARD)}
+                for furture in as_completed(furtures):  
+                    print("All Process is done")
+                sys.exit(1)
+            # else:
+            #     time.sleep(1)
+            #     print("Server is not Connected")
     except Exception as e:
         main_func.can0.shutdown()
         shm.close()

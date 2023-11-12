@@ -13,11 +13,10 @@ import traceback
 import configparser
 
 class UnitBoardGetStatus(threading.Thread):
-    def __init__(self, logging, event, tcp_queue, send_socket, max_unit_board, shared_memory):
+    def __init__(self, logging, tcp_queue, max_unit_board, shared_memory, socket_send_queue, receive_event):
         threading.Thread.__init__(self)
         self.daemon = True
         self.logging = logging
-        self.event = event
         self.tcp_queue = tcp_queue
         self.max_unit_board = max_unit_board
         self.shared_memory = shared_memory
@@ -27,8 +26,10 @@ class UnitBoardGetStatus(threading.Thread):
     
         self.send_data = []
         self.order = 0
-        self.send_client = send_socket
         self.make_json_data()
+        self.socket_send_queue = socket_send_queue
+        self.client = None
+        self.receive_event = receive_event
         logging.info(f'status read thread  is running') 
         
     def make_json_data(self):
@@ -209,116 +210,113 @@ class UnitBoardGetStatus(threading.Thread):
             index_number = self.shared_memory[(i+cnt)*size+0x17]
             self.shared_memory[(i+cnt)*size+0x17] = self.shared_memory[(i+cnt)*size+0x17] + 1            
             self.send_data['STATE'].append({"TANK_ID":f'{400+i}',"STAGE":f'{stage}',"STATUS":status,"INDEX": f'{index_number}'})
-                    
+    
+    def timer_upadate_task(self):    
+        for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
+            data = {"UNIT_ID" : x, "CMD":"GET_STATUS", "SEND" : False}
+            self.tcp_queue.put(data)
+            time.sleep(0.1)
+        self.make_json_data()   
+        time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
+        
+        if self.client and not self.client._closed:
+            self.socket_send_queue.put(bytes(json.dumps(self.send_data), 'UTF-8'))
+        Timer(1, self.timer_upadate_task).start()
+                       
     def run(self):
         common_config = self.config_file['common']
-        
         ip = common_config['HOST']
         port = int(common_config['PORT1']) 
         SERVER_ADDR = (ip, port)
-        timeout_seconds = 1
+        timeout_seconds = 5
+        timer_t = Timer(1, self.timer_upadate_task).start()         #1초 타이머
+        
         while True:
             try: 
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                     client.settimeout(timeout_seconds)
                     client.connect(SERVER_ADDR)
-                    self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
-                    client.settimeout(None)
-                    self.send_client.insert(0, client)                      # 송신 공유 소켓
-                    
+                    self.logging.info(f'송신 서버에 연결 되었습니다.{client} : {port}')
+                    # client.settimeout(None)
+                    self.client = client
                     while True:
-                        if self.event.is_set():                             # 이벤트가 발생되면 Thread 종료
-                            self.event.clear()
-                            return
-                        for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
-                            data = {"UNIT_ID" : x, "CMD":"GET_STATUS", "SEND" : False}
-                            self.tcp_queue.put(data)
-                            time.sleep(0.1)
-                        self.make_json_data()   
-                        time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
                         ######################################################################################################  
                         # 2023-06-19-@K2H 
                         # 서버에 데이터를 전송하기 전에 필요 데이터 정렬
-                        
+                        if self.receive_event.is_set():
+                            self.receive_event.clear()
+                            raise socket.error
+                            continue
+                        send_data = self.socket_send_queue.get()
                         if not client._closed:
-                            client.sendall(bytes(json.dumps(self.send_data), 'UTF-8')) 
-                        
+                            client.sendall(send_data) 
+                        else:
+                            pass        
                         ######################################################################################################
-                        time.sleep(1)    
-            except socket.timeout:
-                if self.event.is_set():                             # 이벤트가 발생되면 Thread 종료
-                    self.event.clear()
-                    return
+                        time.sleep(0.1)    
+            except socket.error as e:
+                client.close()
                 for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
                     data = {"UNIT_ID" : x, "CMD":"GET_STATUS", "SEND" : False}
                     self.tcp_queue.put(data)
                     time.sleep(0.1)
-                self.make_json_data()   
+                # self.make_json_data()   
                 time.sleep(0.5)                                     # shared memory에서 지연시간이 없으면 문제 발생 
-                print("Connection attempt timed out.")
+                print("Transmitter Connection attempt timed out.")
             except Exception as e:
                 time.sleep(0.5)
                 print(e)
-                client.close()          
+                
 class TcpClientThread(threading.Thread):
-    def __init__(self, tcp_queue, logging, GPIOADDR, shared_object, 
-                 i2c_semaphor, MAXUNITBOARD, shm_name, unit_np_shm):
+    def __init__(self, tcp_queue, logging, GPIOADDR, socket_event, 
+                 i2c_semaphor, MAXUNITBOARD, shm_name, unit_np_shm, socket_send_queue):
         threading.Thread.__init__(self)
         self.daemon = True
         self.logging = logging
         self.tcp_queue = tcp_queue
-        self.shared_object = shared_object
         self.GPIOADDR = GPIOADDR
         self.i2c_semaphor = i2c_semaphor
         self.event = threading.Event()
         self.max_unit_board = MAXUNITBOARD
-        self.status_thread = None
         self.shm_name = shm_name
         self.unit_np_shm = unit_np_shm
          
         self.new_shm = shared_memory.SharedMemory(name=self.shm_name)
         self.shared_memory = np.ndarray(unit_np_shm.shape, dtype=unit_np_shm.dtype, buffer=self.new_shm.buf)
     
-        self.send_socket = []
+        self.socket_send_queue = socket_send_queue
+        self.socket_event = socket_event
+    
     def run(self):
         self.logging.info('클라이언트 동작')
         
         config_file = configparser.ConfigParser()                           ## 클래스 객체 생성
         config_file.read('/home/pi/Projects/cosmo-m/config/config.ini')     ## 파일 읽기
         common_config = config_file['common']
-        
+        receive_event = threading.Event()
+        status_thread = UnitBoardGetStatus(self.logging, self.tcp_queue, self.max_unit_board, self.shared_memory, self.socket_send_queue, receive_event)
+        status_thread.start()   
+                    
         ip = common_config['HOST']
         port = int(common_config['PORT2'])               
         SERVER_ADDR = (ip, port)
-        timeout_seconds = 5
+        timeout_seconds = 20
+        old_data = None
+        same_data_cnt = 0
         while True:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
                     client.settimeout(timeout_seconds)
                     client.connect(SERVER_ADDR)
-                    self.logging.info(f'서버에 연결 되었습니다.{client} : {port}')
-                    
-                    if self.status_thread and self.status_thread.is_alive():
-                        self.event.set()                        #기존 쓰레드 소멸
-                        time.sleep(5)
-                    
+                    self.logging.info(f'수신 서버에 연결 되었습니다.{client} : {port}')
+                    self.socket_event.set()
                     self.i2c_semaphor.acquire()
                     i2cbus = smbus.SMBus(1) 
                     i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0xFF)
                     i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF)
                     i2cbus.close()
                     self.i2c_semaphor.release()
-                    self.shared_object.insert(0, client)        #수신 공유 소켓
-                    # self.send_socket = []
-                    
-                    # 상태 리드 관련 쓰레드 생성 ##################################################
-                    if self.status_thread:
-                        del self.status_thread
-                    self.status_thread = UnitBoardGetStatus(self.logging, self.event, self.tcp_queue, self.send_socket, 
-                                                            self.max_unit_board, self.shared_memory)
-                    self.status_thread.start()                  #테스트 용으로 주석 처리하고 동작 시, 주석 해제. json_server_send.py 동작시 주석처리(7002포트 에러 발생)
-                    cnt = 0
-                    client.settimeout(None)
+                    # client.settimeout(None)
                     while True:
                         data = bytearray()
                         while True:
@@ -334,19 +332,30 @@ class TcpClientThread(threading.Thread):
                             data = json.loads(bytes(data).decode('UTF-8'))
                             self.tcp_queue.put(data)
                             
-                            if not self.send_socket[0]._closed:
-                                self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
-                                                                'NOTE': 'OK'
-                                                                }), 'UTF-8')) 
+                            # if not self.send_socket[0]._closed:
+                            self.socket_send_queue.put(bytes(json.dumps({'CMD':'ACK',
+                                                            'NOTE': 'OK'
+                                                            }), 'UTF-8')) 
+                            time.sleep(0.05)
+                            if data == old_data:
+                                same_data_cnt += 1
+                                if same_data_cnt > 2:
+                                    same_data_cnt = 0
+                                    raise socket.error
+                            else:
+                                same_data_cnt = 0
+                            old_data = data
                         except json.decoder.JSONDecodeError as e:
-                            if not self.send_socket[0]._closed:
-                                self.send_socket[0].sendall(bytes(json.dumps({'CMD':'ACK',
-                                                                    'NOTE': 'Resend'
-                                                                    }), 'UTF-8')) 
-                            print(e)
+                            # if not self.send_socket[0]._closed:
+                            self.socket_send_queue.put(bytes(json.dumps({'CMD':'ACK',
+                                                                'NOTE': 'Resend'
+                                                                }), 'UTF-8')) 
+                            raise socket.error
+                            rint(e)
                             print(traceback.format_exc())
-            except socket.timeout:
-                print("Connection attempt timed out.")
+            except socket.error as e:
+                # 소켓 통신 에러 처리
+                print("Receiver Connection attempt timed out.")
                 i2cbus = smbus.SMBus(1) 
                 i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0xFF)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF)
@@ -354,8 +363,20 @@ class TcpClientThread(threading.Thread):
                 i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0x00)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0x00)
                 i2cbus.close()
-            except Exception as e:
                 client.close()
+                receive_event.set()
+                print(f"Receiver Socket error occurred: {e}")
+                # except socket.timeout:
+                #     print("Connection attempt timed out.")
+                #     i2cbus = smbus.SMBus(1) 
+                #     i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0xFF)
+                #     i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0xFF)
+                #     time.sleep(0.5)
+                #     i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0x00)
+                #     i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0x00)
+                #     i2cbus.close()
+                #     client.close()
+            except Exception as e:
                 time.sleep(0.5)
                 print(e)
                 

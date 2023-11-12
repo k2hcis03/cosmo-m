@@ -228,9 +228,9 @@ class UnitBoardTempControl(threading.Thread):
                     print(e)
 
 class UnitBoard:
-    def __init__(self, transmitte_queue, shared_object, GPIOADDR, i2c_semaphor) -> None:
+    def __init__(self, transmitte_queue, socket_send_queue, GPIOADDR, i2c_semaphor) -> None:
         self.can_fd_transmitte_queue = transmitte_queue
-        self.socket = shared_object
+        self.socket_send_queue = socket_send_queue
         self.GPIOADDR = GPIOADDR
         self.i2c_semaphor = i2c_semaphor
         # self.pid_update()
@@ -399,11 +399,11 @@ class UnitBoard:
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x11:
                                     logging.info(f'id : {id} Received message: {message}')
-                                    if self.socket[0]:
+                                    if self.socket_send_queue:
                                         if message.data[4] == 1:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
+                                            self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
                                         else:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
+                                            self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
                                 else:
                                     logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
                             else:
@@ -437,8 +437,8 @@ class UnitBoard:
                                     shared_memory_u[0x04 + id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[12] << 8) | (np.int32)(message.data[13]))
                                     shared_memory_u[0x05 + id*self.shared_memory_size] = (np.int32)((np.int32)(message.data[14] << 8) | (np.int32)(message.data[15]))
                                     unit_semaphor.release()
-                                    if self.socket[0]:
-                                        self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"success!", 
+                                    if self.socket_send_queue:
+                                        self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"success!", 
                                                     "ADC0": f'{shared_memory_u[0x00 + id*self.shared_memory_size]}',
                                                     "ADC1": f'{shared_memory_u[0x01 + id*self.shared_memory_size]}',
                                                     "ADC2": f'{shared_memory_u[0x02 + id*self.shared_memory_size]}',
@@ -474,8 +474,8 @@ class UnitBoard:
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x13:
                                     logging.info(f'id : {id} Received message: {message}')
-                                    if self.socket[0]:
-                                        self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
+                                    if self.socket_send_queue:
+                                        self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
                                 else:
                                     logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response') 
                             else:
@@ -547,8 +547,8 @@ class UnitBoard:
                                     # shared_memory_u[0x12 + id*self.shared_memory_size] = float(f'{(inclination3 * shared_memory_u[2 + id*self.shared_memory_size] - y_offset3) * 100 : 0.2F}')
                                     # shared_memory_u[0x13 + id*self.shared_memory_size] = float(f'{(inclination4 * shared_memory_u[3 + id*self.shared_memory_size] - y_offset4) * 100 : 0.2F}')
                                         
-                                    if command['SEND'] and self.socket[0]:
-                                        self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"success!", 
+                                    if command['SEND'] and self.socket_send_queue:
+                                        self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"success!", 
                                             "TEMP1" : f'{shared_memory_u[0x10 + id*self.shared_memory_size] * 0.01: 0.2F}',
                                             "TEMP2" : f'{shared_memory_u[0x11 + id*self.shared_memory_size] * 0.01: 0.2F}',
                                             "GPO4~GPO1": f'{shared_memory_u[0x06 + id*self.shared_memory_size]}',
@@ -572,15 +572,15 @@ class UnitBoard:
                             event.set()
                             temp_thread.temp_control_start = True
                             
-                            if self.socket[0]:
-                                self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
+                            if self.socket_send_queue:
+                                self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'STOP_TEMP':
                         if int(self.config['ADDRESS'], 16) != 0xFFF:
                             temp_thread.temp_control_start = False
                             
-                            if self.socket[0]:
-                                self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
+                            if self.socket_send_queue:
+                                self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'TEMP_RPM':
                         if int(self.config['ADDRESS'], 16) != 0xFFF:
@@ -618,11 +618,11 @@ class UnitBoard:
                                 message = can_fd_receive_queue.get()
                                 if message.data[1] == 0x17:
                                     logging.info(f'id : {id} Received message: {message}')
-                                    if command['SEND'] and self.socket[0]:
+                                    if command['SEND'] and self.socket_send_queue:
                                         if message.data[4] == 1:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
+                                            self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
                                         else:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
+                                            self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
                                 else:
                                     logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
                             else:
@@ -653,11 +653,11 @@ class UnitBoard:
                                     logging.info(f'id : {id} Received message: {message}')
                                     # temp_thread.set_cold_valve(message.data[5])   # 지속적인 재전송을 원하면 주석 해제. 
                                     
-                                    if self.socket[0]:
+                                    if self.socket_send_queue:
                                         if message.data[4] == 1:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
+                                            self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":f"success!"}), 'UTF-8'))
                                         else:
-                                            self.socket[0].sendall(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
+                                            self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"fail!"}), 'UTF-8'))
                                 else:
                                     logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
                             else:
