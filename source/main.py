@@ -194,7 +194,7 @@ def main():
                                   shm.name, main_func.unit_np_shm, socket_send_queue)
     main_func.client.start()                            #tcp client 시작
     unitboard.g_file_path = common_config['JSON_FILE']
-    print("Server is not Connected")
+    # print("Server is not Connected")
     try:
         while True:
             # if shared_object[0] and not shared_object[0]._closed:           # 처음 서버에 연결 될 때까지 무한루프 실행
@@ -202,7 +202,7 @@ def main():
             socket_event.wait()
             socket_event.clear()
             print("Server is Connected")
-            with ProcessPoolExecutor(max_workers=20) as executor:
+            with ProcessPoolExecutor(max_workers=16) as executor:
                 unit_func = unit_board(can_fd_transmitte.queue, socket_send_queue, GPIOADDR, i2c_semaphor)
                 
                 furtures = {executor.submit(unit_func.unit_process, i, shm.name, main_func.unit_np_shm, 

@@ -11,6 +11,8 @@ from threading import Timer
 from multiprocessing import shared_memory
 import traceback
 import configparser
+from signal import signal, SIGPIPE, SIG_DFL
+# signal(SIGPIPE,SIG_DFL)
 
 class UnitBoardGetStatus(threading.Thread):
     def __init__(self, logging, tcp_queue, max_unit_board, shared_memory, socket_send_queue, receive_event):
@@ -246,16 +248,19 @@ class UnitBoardGetStatus(threading.Thread):
                         if self.receive_event.is_set():
                             self.receive_event.clear()
                             raise socket.error
-                            continue
                         send_data = self.socket_send_queue.get()
                         if not client._closed:
                             client.sendall(send_data) 
                         else:
                             pass        
                         ######################################################################################################
-                        time.sleep(0.1)    
+                        if len(send_data) > 1024:
+                            time.sleep(1)   
+                        else:
+                            time.sleep(0.1)
             except socket.error as e:
                 client.close()
+                print(f"Transmitter Socket error occurred: {e}")
                 for x in range(self.max_unit_board):                # 유닛보드마다 1초마다 get_status명령어 수행
                     data = {"UNIT_ID" : x, "CMD":"GET_STATUS", "SEND" : False}
                     self.tcp_queue.put(data)
@@ -334,20 +339,23 @@ class TcpClientThread(threading.Thread):
                             
                             # if not self.send_socket[0]._closed:
                             self.socket_send_queue.put(bytes(json.dumps({'CMD':'ACK',
+                                                            'IDX': data['IDX'],             
                                                             'NOTE': 'OK'
                                                             }), 'UTF-8')) 
                             time.sleep(0.05)
-                            if data == old_data:
+                            if data['IDX'] == old_data:
                                 same_data_cnt += 1
                                 if same_data_cnt > 2:
                                     same_data_cnt = 0
                                     raise socket.error
                             else:
                                 same_data_cnt = 0
-                            old_data = data
+                            old_data = data['IDX']
                         except json.decoder.JSONDecodeError as e:
                             # if not self.send_socket[0]._closed:
+                            index = '999'       #JSON 에러 발생 시, 'IDX'값이 쓰레기가 있기때문에 '999'을 강제 셋팅
                             self.socket_send_queue.put(bytes(json.dumps({'CMD':'ACK',
+                                                                'IDX': index,
                                                                 'NOTE': 'Resend'
                                                                 }), 'UTF-8')) 
                             raise socket.error
