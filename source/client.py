@@ -255,7 +255,7 @@ class UnitBoardGetStatus(threading.Thread):
                             pass        
                         ######################################################################################################
                         if len(send_data) > 1024:
-                            time.sleep(1)   
+                            time.sleep(0.5)   
                         else:
                             time.sleep(0.1)
             except socket.error as e:
@@ -347,7 +347,16 @@ class TcpClientThread(threading.Thread):
                                 same_data_cnt += 1
                                 if same_data_cnt > 2:
                                     same_data_cnt = 0
-                                    raise socket.error
+                                    
+                                    while not self.socket_send_queue.empty():
+                                        self.socket_send_queue.get()
+                                        
+                                    self.socket_send_queue.put(bytes(json.dumps({'CMD':'ACK',
+                                                            'IDX': data['IDX'],             
+                                                            'NOTE': 'OK'
+                                                            }), 'UTF-8')) 
+                                    receive_event.set()
+                                    # raise socket.error
                             else:
                                 same_data_cnt = 0
                             old_data = data['IDX']
@@ -370,9 +379,9 @@ class TcpClientThread(threading.Thread):
                 time.sleep(0.5)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x12, 0x00)
                 i2cbus.write_byte_data(self.GPIOADDR, 0x13, 0x00)
-                i2cbus.close()
+                i2cbus.close()   
                 client.close()
-                receive_event.set()
+                # receive_event.set()
                 print(f"Receiver Socket error occurred: {e}")
                 # except socket.timeout:
                 #     print("Connection attempt timed out.")

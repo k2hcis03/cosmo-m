@@ -81,7 +81,7 @@ class CosmoMain(threading.Thread):
     def run(self):
         while True:   
             message = self.tcp_queue.get()  
-            if  message['CMD'] != 'GET_STATUS':         # GET_STATUS는 계속 호출 되므로 log에 출력 하지 않음.
+            if  message['CMD'] != 'GET_STATUS' and message['CMD'] != 'PING':         # GET_STATUS는 계속 호출 되므로 log에 출력 하지 않음.
                 if message['CMD'] == 'REF':
                     logging.info(f"{message['CMD']} command is inserted to {message['TANK_ID']} Unit Board")
                 elif message['CMD'] == 'STATE':
@@ -160,7 +160,7 @@ def main():
 
     global MAXUNITBOARD, ADDRESS
     MAXUNITBOARD = int(common_config['MAXUNITBOARD'])
-    GPIOADDR = int(common_config['GPIOADDR'], 16)
+    GPIOADDR = int(common_config['GPIOADDR'], base=16)
     
     # ip = common_config['HOST']
     # port = int(common_config['PORT2'])   

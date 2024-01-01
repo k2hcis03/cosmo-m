@@ -144,7 +144,10 @@ class UnitBoardTempControl(threading.Thread):
                                 os.mkdir(self.dir_name)
                             self.writer_csv = open(f'{self.dir_name}/pid_process{self.id}_{self.file_index}.csv', 'w', encoding='utf-8', newline='')
                             self.writer = csv.writer(self.writer_csv, delimiter=',')
-                            self.writer.writerow(['time'] + ['ref.temp'] + ['real temp'] + ['valve on time']  + ['ext1 temp'] + ['ext1 humi'] + ['ext2 temp'] + ['ext2 humi'])   
+                            self.writer.writerow(['time'] + ['ref.temp'] + ['real temp'] + ['valve on time']  + ['ext1 temp'] + ['ext1 humi'] + 
+                                                 ['ext2 temp'] + ['ext2 humi'] + ['relay1_water'] + ['relay2_cold'] + ['relay3_res1'] + ['relay4_res2'] + ['relay4_res3'] + 
+                                                 ['rpm'] + ['analog1_up'] + ['analog3_res1'] + ['analog4_res2'] + ['analog5_res3'] +['analog6_res4'])   
+                            #real temp == analog2, 
                             self.file_write = False
                         except Exception as e:
                             print(e)
@@ -185,10 +188,27 @@ class UnitBoardTempControl(threading.Thread):
                                     current_ext_humi2 = self.shared_memory_u[0x0F + self.id*self.shared_memory_size] * 0.1 #Ext Humi2
                                     self.motor_rpm = self.shared_memory_u[0x0A + self.id*self.shared_memory_size]          #RPM
                                     
+                                    
+                                    analog1 = self.shared_memory_u[0x10 + self.id*self.shared_memory_size] * 0.01 #온도 센서 1
+                                    analog3 = self.shared_memory_u[0x12 + self.id*self.shared_memory_size] * 0.01 #온도 센서 3
+                                    analog4 = self.shared_memory_u[0x13 + self.id*self.shared_memory_size] * 0.01 #온도 센서 4
+                                    analog5 = self.shared_memory_u[0x14 + self.id*self.shared_memory_size] * 0.01 #온도 센서 5
+                                    analog6 = self.shared_memory_u[0x15 + self.id*self.shared_memory_size] * 0.01 #온도 센서 6
+                                    
+                                    gpio1 = (self.shared_memory_u[0x06 + self.id*self.shared_memory_size]) & 0xFF
+                                    gpio2 = (self.shared_memory_u[0x06 + self.id*self.shared_memory_size] >> 8) & 0xFF
+                                    gpio3 = (self.shared_memory_u[0x06 + self.id*self.shared_memory_size] >> 16) & 0xFF
+                                    gpio4 = (self.shared_memory_u[0x06 + self.id*self.shared_memory_size] >> 24) & 0xFF
+                                    gpio5 = (self.shared_memory_u[0x07 + self.id*self.shared_memory_size]) & 0xFF
+                                    
                                     if self.file_write_state:                               #STATE가 Run이면 True Pause면 False
                                         self.writer.writerow([time.time(), ref_temp, current_temp2, self.time_to_on, current_ext_temp1, current_ext_humi1, 
-                                                              current_ext_temp2, current_ext_humi2])
-                                        print(f'id: {self.id} period: {time.time()} time to on: {self.time_to_on} C.T: {current_temp2:0.2F} and F.T: {ref_temp}') 
+                                                              current_ext_temp2, current_ext_humi2, gpio1, gpio2, gpio3, gpio4, gpio5, self.motor_rpm, 
+                                                              analog1, analog3, analog4, analog5, analog6])
+                                        print(f'id: {self.id} period: {time.time()} time to on: {self.time_to_on} C.T: {current_temp2:0.2F} and F.T: {ref_temp}')
+                                        
+                                        # print(f'id: {self.id} analog1: {analog1} analog3: {analog3} analog4: {analog4} analog5: {analog5} and analog6: {analog6}')
+                                        # print(f'id: {self.id} gpio1: {gpio1} gpio2: {gpio2} gpio3: {gpio3} gpio4: {gpio4} and gpio5: {gpio5}') 
                                         
                                     if self.config["TEMP_CONTROL"] == 'PID':
                                         inc = self.pid(current_temp2)
@@ -269,15 +289,18 @@ class UnitBoard:
         # SET_CONFIG 명령어 수행
         message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
                                     data=[0xF2, 0x16, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
-        message.data[4] = int(self.config['MOTOR_ID'])
-        temp = int(self.config['SLEEP_SPEED'])
-        message.data[6] = temp & 0xff               #big endian
-        message.data[5] = (temp >> 8) & 0xff        #big endian
-        message.data[7] = int(self.config['EXT_TEMP1_ID']) 
-        message.data[8] = int(self.config['EXT_TEMP2_ID']) 
-        message.data[9] = 1                         # 1 = GPIO초기화 
-        message.data[10] = 0xFF
-
+        try:
+            message.data[4] = int(self.config['MOTOR_ID'], base=16)
+            temp = int(self.config['SLEEP_SPEED'])
+            message.data[6] = temp & 0xff               #big endian
+            message.data[5] = (temp >> 8) & 0xff        #big endian
+            message.data[7] = int(self.config['EXT_TEMP1_ID'], base=16) 
+            message.data[8] = int(self.config['EXT_TEMP2_ID'], base=16) 
+            message.data[9] = 1                         # 1 = GPIO초기화 
+            message.data[10] = 0xFF
+        except ValueError as e:
+            print(e)
+            
         while not can_fd_receive_queue.empty():
             can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
         
@@ -414,7 +437,7 @@ class UnitBoard:
                                 logging.warning(f'id : {id} {command["CMD"]} unit board is not response')   
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')            
                     elif command['CMD'] == 'GET_ADC':
-                        if int(self.config['ADDRESS'], 16) != 0xFFF:
+                        if int(self.config['ADDRESS'], base=16) != 0xFFF:
                             message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
                                         data=[0xF2, 0x12, 0x05, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xF3])
                             
@@ -455,7 +478,7 @@ class UnitBoard:
                                 logging.warning(f'id : {id} {command["CMD"]} unit board is not response') 
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'SET_GPIO':
-                        if int(self.config['ADDRESS'], 16) != 0xFFF:
+                        if int(self.config['ADDRESS'], base=16) != 0xFFF:
                             message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
                                         data=[0xF2, 0x13, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                                                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
@@ -486,7 +509,7 @@ class UnitBoard:
                                 logging.warning(f'id : {id} {command["CMD"]} unit board is not response') 
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'GET_STATUS':
-                        if int(self.config['ADDRESS'], 16) != 0xFFF:
+                        if int(self.config['ADDRESS'], base=16) != 0xFFF:
                             # 온도계산 전에 GET_ADC를 호출 함. --> 명령어를 통합하여 ADC 값까지 GET_STATUS에서 읽어 옴.
                             message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
                                         data=[0xF2, 0x14, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
@@ -513,11 +536,17 @@ class UnitBoard:
                                     inclination2 = 77.5 / (float(self.config['TEMP2_77_5']) - float(self.config['TEMP2_0']))
                                     y_offset2 = inclination2 * float(self.config['TEMP2_0'])
                                     
-                                    # inclination3 = 77.5 / (float(self.config['TEMP3_77_5']) - float(self.config['TEMP3_0']))
-                                    # y_offset3 = inclination3 * float(self.config['TEMP3_0'])
+                                    inclination3 = 77.5 / (float(self.config['TEMP3_77_5']) - float(self.config['TEMP3_0']))
+                                    y_offset3 = inclination3 * float(self.config['TEMP3_0'])
                                     
-                                    # inclination4 = 77.5 / (float(self.config['TEMP4_77_5']) - float(self.config['TEMP4_0']))
-                                    # y_offset4 = inclination4 * float(self.config['TEMP4_0'])
+                                    inclination4 = 77.5 / (float(self.config['TEMP4_77_5']) - float(self.config['TEMP4_0']))
+                                    y_offset4 = inclination4 * float(self.config['TEMP4_0'])
+                                    
+                                    inclination5 = 77.5 / (float(self.config['TEMP5_77_5']) - float(self.config['TEMP5_0']))
+                                    y_offset5 = inclination3 * float(self.config['TEMP5_0'])
+                                    
+                                    inclination6 = 77.5 / (float(self.config['TEMP6_77_5']) - float(self.config['TEMP6_0']))
+                                    y_offset6 = inclination4 * float(self.config['TEMP6_0'])
                                         
                                     unit_semaphor.acquire()
                                     shared_memory_u[0x06 + id*self.shared_memory_size] = (np.int32)(message.data[7] << 24 | message.data[6] << 16 
@@ -545,6 +574,12 @@ class UnitBoard:
                                     # ADC 값에 온도 계산식을 추가해서 공유메모리에 저장 여기서는 2개만 계산하고 필요하면 추가.
                                     shared_memory_u[0x10 + id*self.shared_memory_size] = float(f'{(inclination1 * shared_memory_u[0 + id*self.shared_memory_size] - y_offset1) * 100 : 0.2F}')
                                     shared_memory_u[0x11 + id*self.shared_memory_size] = float(f'{(inclination2 * shared_memory_u[1 + id*self.shared_memory_size] - y_offset2) * 100 : 0.2F}')
+                                    
+                                    shared_memory_u[0x12 + id*self.shared_memory_size] = float(f'{(inclination3 * shared_memory_u[2 + id*self.shared_memory_size] - y_offset3) * 100 : 0.2F}')
+                                    shared_memory_u[0x13 + id*self.shared_memory_size] = float(f'{(inclination4 * shared_memory_u[3 + id*self.shared_memory_size] - y_offset4) * 100 : 0.2F}')
+                                    
+                                    shared_memory_u[0x14 + id*self.shared_memory_size] = float(f'{(inclination5 * shared_memory_u[4 + id*self.shared_memory_size] - y_offset5) * 100 : 0.2F}')
+                                    shared_memory_u[0x15 + id*self.shared_memory_size] = float(f'{(inclination6 * shared_memory_u[5 + id*self.shared_memory_size] - y_offset6) * 100 : 0.2F}')
                                     unit_semaphor.release()
                                     
                                     # print(f'top temp. is {shared_memory_u[0x10 + id*self.shared_memory_size]*0.01:0.2F} and bottom temp. is {shared_memory_u[0x11 + id*self.shared_memory_size]*0.01}')
@@ -572,7 +607,7 @@ class UnitBoard:
                                 logging.warning(f'id : {id} {command["CMD"]} unit board is not response') 
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'START_TEMP':
-                        if int(self.config['ADDRESS'], 16) != 0xFFF:
+                        if int(self.config['ADDRESS'], base=16) != 0xFFF:
                             event.set()
                             temp_thread.temp_control_start = True
                             
@@ -580,14 +615,14 @@ class UnitBoard:
                                 self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'STOP_TEMP':
-                        if int(self.config['ADDRESS'], 16) != 0xFFF:
+                        if int(self.config['ADDRESS'], base=16) != 0xFFF:
                             temp_thread.temp_control_start = False
                             
                             if self.socket_send_queue:
                                 self.socket_send_queue.put(bytes(json.dumps({"id" : f'{id}', "status":"success!"}), 'UTF-8'))
                             # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')
                     elif command['CMD'] == 'TEMP_RPM':
-                        if int(self.config['ADDRESS'], 16) != 0xFFF:
+                        if int(self.config['ADDRESS'], base=16) != 0xFFF:
                             message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
                                         data=[0xF2, 0x17, 0x0B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
 
@@ -687,11 +722,11 @@ class UnitBoard:
                                 else:
                                     value = OFF
                                 #
-                                if int(self.config['ADDRESS'], 16) != 0xFFF:
+                                if int(self.config['ADDRESS'], base=16) != 0xFFF:
                                     message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
                                                 data=[0xF2, 0x19, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
                                 
-                                temp = int(float(command['CTRL'][0]['PARAM1'])) * 10
+                                temp = int(float(command['CTRL'][0]['PARAM1']) * 10) 
                                 message.data[4] = int(x)
                                 message.data[5] = value
                                 message.data[7] = temp & 0xff               # big endian
