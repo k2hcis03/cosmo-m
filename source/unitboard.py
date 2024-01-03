@@ -226,7 +226,8 @@ class UnitBoardTempControl(threading.Thread):
                                     self.pid_timer_event.wait()                             #0.1초 또는 1초 타이머가 50번 또는 7 호출되는것을 기다림
                                     self.pid_timer_event.clear()
                                 else:
-                                    self.writer_csv.close() 
+                                    if self.writer_csv.closed:
+                                        self.writer_csv.close()
                                     break
                         else:
                             self.timer_control_valve = False
@@ -243,11 +244,14 @@ class UnitBoardTempControl(threading.Thread):
                             #self.command_queue.put(message) 
                             #self.logging.info(f"{message['CMD']} command is inserted Unit Board")
                             break
+                    if not self.writer_csv.closed:
+                        self.writer_csv.close()
                     self.pid.reset()            #pause 또는 stop이 오면 pid reset후 처음부터 다시 시작
                     self.set_cold_valve(OFF)    #pause 또는 stop이 오면 냉각 밸브를 off 시킴
                     ##############################################################################################################
                 except Exception as e:
-                    self.writer_csv.close()
+                    if self.writer_csv.closed:
+                        self.writer_csv.close()
                     print(e)
 
 class UnitBoard:
