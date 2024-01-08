@@ -67,6 +67,7 @@ class UnitBoardTempControl(threading.Thread):
         self.timer_control_valve = False    # 타이머로 제어 할 때, 시간 마다 한 번만 제어 하기위한 변수
         self.motor_rpm = 0                  # 모터 현재 속도
         self.dir_name = None                # data 기록 디렉토리 생성 initial 상태에서 업데이트 됨
+    
     def set_cold_valve(self, value):
         self.cold_valve_status = value
         x = self.config["SOLVALVE2"]        #냉각수 밸브 I/O 번호
@@ -109,7 +110,7 @@ class UnitBoardTempControl(threading.Thread):
                                         "TIME" : ref_motor_time,
                                         "SEND" : False}    
                         self.command_queue.put(message) 
-                        self.logging.info(f"{message['CMD']} command is inserted Unit Board")
+                        # self.logging.info(f"{message['CMD']} command is inserted Unit Board")
             else:
                 if self.cold_valve_status == 1:
                     self.set_cold_valve(OFF) 
@@ -173,7 +174,7 @@ class UnitBoardTempControl(threading.Thread):
                                         "TIME" : ref_motor_time,
                                         "SEND" : False}    
                             self.command_queue.put(message) 
-                            self.logging.info(f"{message['CMD']} command is inserted Unit Board")
+                            # self.logging.info(f"{message['CMD']} command is inserted Unit Board")
                             # self.logging.info(f'id : {self.id} UnitBoard Temp Control Thread {x} Step Start at {time_start} Time')
                             self.timer_control_valve = True     # ref_step마다 한번씩 ON 해준다.
                             
@@ -322,6 +323,21 @@ class UnitBoard:
         while True:
             try: 
                 command = command_queue.get()
+                
+                if  command['CMD'] != 'GET_STATUS' and command['CMD'] != 'PING':         # GET_STATUS는 계속 호출 되므로 log에 출력 하지 않음.
+                    if command['CMD'] == 'REF':
+                        logging.info(f"{command['CMD']} command is inserted to {command['TANK_ID']} Unit Board")
+                    elif command['CMD'] == 'STATE':
+                        logging.info(f"{command['CMD']} command is inserted Unit Board")
+                    elif command['CMD'] == 'TEMP_VALVE':
+                        logging.info(f"{command['CMD']} and valve {command['VALUE']} command is inserted Unit Board")
+                    elif command['CMD'] == 'WEIGHT_VALVE':
+                        logging.info(f"{command['CMD']} and valve {command['VALUE']} command is inserted Unit Board")
+                    elif command['CMD'] == 'TEMP_RPM':
+                        logging.info(f"{command['CMD']} and rpm {command['SPEED']} command is inserted Unit Board")
+                    else:
+                        logging.info(f"{command['CMD']} command is inserted Unit Board")
+                
                 self.i2c_semaphor.acquire()
                 i2cbus = smbus.SMBus(1)
                 if int(command['UNIT_ID']) < 14:
@@ -705,7 +721,38 @@ class UnitBoard:
                                     logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
                             else:
                                 logging.warning(f'id : {id} {command["CMD"]} unit board is not response')  
-                            # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')      
+                            # logging.info(f'id : {id} UnitBoard execute {command["CMD"]}')   
+                    elif command['CMD'] == 'WEIGHT_VALVE':
+                        if int(self.config['ADDRESS'], base=16) != 0xFFF:
+                            message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
+                                        data=[0xF2, 0x19, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
+                            
+                            temp = command['WEIGHT']                    # int(float(command['CTRL'][0]['PARAM1']) * 10) 
+                            message.data[4] = int(command['CHANNEL']) 
+                            message.data[5] = command['VALUE']
+                            message.data[7] = temp & 0xff               # big endian
+                            message.data[6] = (temp >> 8) & 0xff        # big endian
+                            message.data[8] = command['ONTIME']
+                                
+                            while not can_fd_receive_queue.empty():
+                                can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
+                            
+                            self.can_fd_transmitte_queue.put(message) 
+                            # time.sleep(0.40)
+                            wait = 0
+                            while can_fd_receive_queue.empty():
+                                time.sleep(0.01)
+                                wait += 1
+                                if wait > 120:
+                                    break
+                            if not can_fd_receive_queue.empty():
+                                message = can_fd_receive_queue.get()
+                                if message.data[1] == 0x19:
+                                    logging.info(f'id : {id} Received message: {message}')
+                                else:
+                                    logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
+                            else:
+                                logging.warning(f'id : {id} {command["CMD"]} unit board is not response')   
                     elif command['CMD'] == 'CTRL':
                         if int(self.config['TANK_ID']) == int(command['TANK_ID']) and int(self.config['ADDRESS'], 16) != 0xFFF:
                             if command['CTRL'][0]['SENSOR_ID'] == '500':    #밸브는 4개 밸브 아이디는 500부터 시작 500-> 냉각
@@ -726,36 +773,15 @@ class UnitBoard:
                                 else:
                                     value = OFF
                                 #
-                                if int(self.config['ADDRESS'], base=16) != 0xFFF:
-                                    message = can.Message(is_extended_id=False, is_fd = True, arbitration_id=0x300+id,  
-                                                data=[0xF2, 0x19, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF3])
-                                
                                 temp = int(float(command['CTRL'][0]['PARAM1']) * 10) 
-                                message.data[4] = int(x)
-                                message.data[5] = value
-                                message.data[7] = temp & 0xff               # big endian
-                                message.data[6] = (temp >> 8) & 0xff        # big endian
-                                message.data[8] = int(self.config["WATER_VALVE_ON_TIME"])
-                                    
-                                while not can_fd_receive_queue.empty():
-                                    can_fd_receive_queue.get()             # as docs say: Remove and return an item from the queue.
-                                
-                                self.can_fd_transmitte_queue.put(message) 
-                                # time.sleep(0.40)
-                                wait = 0
-                                while can_fd_receive_queue.empty():
-                                    time.sleep(0.01)
-                                    wait += 1
-                                    if wait > 120:
-                                        break
-                                if not can_fd_receive_queue.empty():
-                                    message = can_fd_receive_queue.get()
-                                    if message.data[1] == 0x19:
-                                        logging.info(f'id : {id} Received message: {message}')
-                                    else:
-                                        logging.warning(f'id : {id} {command["CMD"]} unit board is wrong response')  
-                                else:
-                                    logging.warning(f'id : {id} {command["CMD"]} unit board is not response')   
+                                ontime = int(self.config["WATER_VALVE_ON_TIME"])
+                                message = {"UNIT_ID" : id,                  
+                                            "CMD":"WEIGHT_VALVE",
+                                            "CHANNEL": x,
+                                            "VALUE" : value,
+                                            "WEIGHT" : temp, 
+                                            "ONTIME" : ontime}
+                                command_queue.put(message)
                             elif command['CTRL'][0]['SENSOR_ID'] == '502':
                                 pass
                             elif command['CTRL'][0]['SENSOR_ID'] == '503':
